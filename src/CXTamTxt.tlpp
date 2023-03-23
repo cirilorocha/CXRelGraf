@@ -1,0 +1,462 @@
+#INCLUDE "Protheus.ch"
+#INCLUDE "RWMake.ch"
+#Include "Font.ch"
+#INCLUDE "RPTDEF.CH"
+#INCLUDE "FWPrintSetup.ch"
+#INCLUDE "CXaTamFont.ch"
+#Include "ParmType.ch"
+#Include "CXInclude.ch"
+
+//#############################################################################
+//##+----------+--------------+-------+-----------------+------+------------+##
+//##|Programa  | CXTamTxt     | Autor | Cirilo Rocha    | Data | 27/01/2012 |##
+//##+----------+--------------+-------+-----------------+------+------------+##
+//##|Desc.     | Fonte otimizado para obter o tamanho do texto grafico      |##
+//##+----------+-----------+------------------------------------------------+##
+//##|   DATA   |Programador| Manutenção efetuada                            |##
+//##+----------+-----------+------------------------------------------------+##
+//##| 02/04/12 | Cirilo R. | Pequena melhoria para os caracteres não im-    |##
+//##|          |           |  primíveis                                     |##
+//##| 09/04/12 | Cirilo R. | Melhoria para impressão quando usando a classe |##
+//##|          |           |  FWMSPrinter (Danfe)                           |##
+//##| 22/08/12 | Cirilo R. | Melhorias e correções para impressão usando    |##
+//##|          |           |  FWMSPrinter e TMSPrinter                      |##
+//##| 11/10/12 | Cirilo R. | Otimização para armazenar os tamanhos de fonte |##
+//##|          |           |  gerados pela classe FWFontCst                 |##
+//##|          |           | Melhoria na precisão da funcao, usando sempre a|##
+//##|          |           |  classe TMSPrinter para medir o tamanho        |##
+//##| 06/02/14 | Cirilo R. | Reajustado o tamanho em PDF para o FWMSP       |##
+//##| 27/01/15 | Cirilo R. | Ajuste no fonte para os novos binários         |##
+//##| 12/02/15 | Cirilo R. | Corrigido problema de erro log ao executar via |##
+//##|          |           |  job                                           |##
+//##| 09/05/15 | Cirilo R. | Pequeno ajuste no fonte e correção de erroLog  |##
+//##|          |           |  quando imprimindo em pdf                      |##
+//##| 20/07/15 | Cirilo R. | Correção na impressão do TMSPrinter            |##
+//##| 07/03/16 | Cirilo R. | Pequena melhoria no array de otimização        |##
+//##|          |           | Melhoria na impressão via Spool usando a função|##
+//##|          |           |  FWTamFon orientado pela Totvs SP              |##
+//##| 30/09/16 | Cirilo R. | Tratamento definitivo para o erro log na im-   |##
+//##|          |           |   pressão PDF                                  |##
+//##|          |           | Pequenas melhorias no fonte                    |##
+//##| 15/10/19 | Cirilo R. | Ajustes para a release 12.1.25                 |##
+//##|          |           | Pequena revisão no fonte                       |##
+//##| 11/05/20 | Cirilo R. | Ajuste na impressão da build 191205P           |##
+//##| 14/03/23 | Cirilo R. | Pequena revisão no fonte                       |##
+//##|          |           | Otimização com cache Json                      |##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##+----------+-----------+------------------------------------------------+##
+//#############################################################################
+//+-----------------------------------------------------------------------------------------------+
+//| Variaveis compartilhadas (OTIMIZACAO)                                                         |
+//| Nao precisam ser recriadas a cada execucao da rotina.                                         |
+//| Na primeira vez a rotina alimenta as variaveis                                                |
+//| Nas demais execucoes busca os dados armazenada dos nos arrays.                                |
+//| O aFontSize pode compartilhar os tamanhos com o array do objeto FWFontCst economizando memória|
+//+-----------------------------------------------------------------------------------------------+
+Static aFontSize	:= {}						AS Array
+Static jFontCache	:= JsonObject():New()		AS Json
+Static oFontSize	:= NIL						AS Object
+Static oTMSPrinter	:= NIL						AS Object
+//-------------------------------------------------------------------------------------------------
+User Function CXTamTxt(	cTexto	,;	//01 cTexto
+						oFonte	,;	//02 oFonte
+						oPrinter);	//03 oPrinter
+							AS Numeric
+
+	//Declaracao de variaveis----------------------------------------------------------------------
+	Local aTamFont			AS Array
+	Local cChar				AS Character
+	Local cChave			AS Character
+	Local cFonte			AS Character
+//	Local lAjusteTMS		AS Logical
+	Local lAdjustToLegacy	AS Logical
+	Local lBold				AS Logical
+//	Local lFWFontSize		AS Logical
+	Local lFWMSPDF	  		AS Logical
+	Local lFWMSPrinter		AS Logical
+	Local lItalic			AS Logical
+	Local lJob				AS Logical
+	Local lTMSPrinter		AS Logical
+	Local nFator			AS Numeric
+	Local nHeight			AS Numeric
+	Local nPos              AS Numeric
+	Local nTamFont			AS Numeric
+	Local nTipoTam			AS Numeric
+	Local nWidth			AS Numeric
+	Local nX                AS Numeric
+	Local unTamEsp			AS Variant /*Numeric*/
+	
+	//Usa essa variavel privada para determinar algumas caracteristicas do objeto do relatorio
+	Private oTemp			AS Object
+
+	//Parametros da rotina-------------------------------------------------------------------------
+	ParamType 0	VAR cTexto		AS Character
+	ParamType 1	VAR oFonte		AS Object Class tFont,tFontEx						Optional Default NIL
+	ParamType 2	VAR oPrinter	AS Object Class FWMSPrinter,CXMSPrinter,TMSPrinter	Optional Default NIL
+
+	//Inicializa Variaveis-------------------------------------------------------------------------
+	nFator			:= 1
+	aTamFont		:= {}
+					
+	lFWMSPrinter	:= .F.
+	lFWMSPDF	  	:= .F.
+	lAdjustToLegacy	:= .F.
+//	lAjusteTMS		:= .F.
+	lTMSPrinter		:= .F.
+	
+	//Calculo de tamanho de objeto grafico (TMSPrinter ou FWMSPrinter)
+	If ValType(oFonte) == 'O'
+		
+		oTemp	  	:= @oPrinter   //Por referencia para OTIMIZACAO
+		
+		//------------------------------------------------------------------------------------------------------
+	
+		//Ojbeto FWMSPrinter?
+		If Type('oTemp:lAdjustToLegacy') == 'L'
+			lFWMSPrinter	:= .T.
+			lFWMSPDF		:= ( oTemp:nDevice == IMP_PDF )		//Impressao em PDF?
+			lAdjustToLegacy	:= oTemp:lAdjustToLegacy         	//Ajuste de legado para o TMSPrinter?
+			lJob			:= oTemp:lInJob						//Execucao via Job?
+		//Objeto TMSPrinter
+		Else
+			lTMSPrinter		:= .T.
+			lJob			:= .T.
+		EndIf
+		
+		//------------------------------------------------------------------------------------------------------		
+
+		//Inicializa informacoes da fonte
+		cFonte		:= Upper(AllTrim(oFonte:Name))
+		nWidth		:= oFonte:nWidth
+		nHeight		:= oFonte:nHeight
+		lBold		:= oFonte:Bold
+		lItalic		:= oFonte:Italic
+	
+		//------------------------------------------------------------------------------------------------------
+	
+		//+--------------------------------------------------------------+
+		//| Sempre utilizara o objeto TMSPrinter, apos testes foi o que  |
+		//| refletiu melhor o tamanho real do texto em todas as situacoes|
+		//+--------------------------------------------------------------+
+
+		//+------------------+----------------------------------------+
+		//|                  |          OBJETOS PARA MEDICAO          |
+		//| TESTES		TIPO +------------+-------------+-------------+
+		//|               	 | TMSPrinter | FWMSPrinter | FWFontSize  |
+		//+------------------+------------+-------------+------------+- 
+		//|FWMSPrinter PDF	 |    100%    |      60%    |     96%     | 
+		//|FWMSPrinter IMP	 |     95%    |      60%    |     92%     | 
+		//|FWLegado    PDF	 |     98%    |      --%    |     97%     | 
+		//|FWLegado    IMP   |     96%    |      --%    |     94%     |
+		//|TMSPrinter		 |       %    |      --%    |     ---     |
+		//+------------------+------------+-------------+-------------+
+		
+		//Se for via Job forca usar FWFontSize
+		If lFWMSPrinter
+      	
+			If lFWMSPDF
+				If lJob
+					nTipoTam		:= nTM_FWFONTSIZE 
+//      		ElseIf oTMSPrinter == NIL
+					//+-------------------------------------------------------------------------------+
+					//| AO enviar impressao em PDF usando o objeto TMSPrinter o mesmo apresenta erro, |
+					//| desta forma so uso este caso ja tenha sido inicializado antes.                |
+					//+-------------------------------------------------------------------------------+
+//	      		nTipoTam		:= nTM_FWFONTSIZE
+//	      	Else
+//	      		nTipoTam		:= nTM_TMSPRINTER
+				
+				Else
+					nTipoTam		:= nTM_FWFONTSIZE //Forco a usar sempre o FWFontSize em PDF
+				EndIf
+			Else
+				nTipoTam		:= nTM_FWMSPRINTER
+			EndIf
+		Else
+			nTipoTam	:= nTM_FWMSPRINTER//nTM_TMSPRINTER
+			nFator		*= 3.65
+		EndIf
+		
+		//------------------------------------------------------------------------------------------------------	
+		//lFWFontSize	:= ( nTipoTam == nTM_FWFONTSIZE )
+		cChave	:= _GetChave(oFonte,nTipoTam)
+
+		//+------------------------------------------------+
+		//| Busca a fonte armazenada no array (otimizacao) |
+		//+------------------------------------------------+
+		nPos	:= IIF(jFontCache:hasProperty(cChave),jFontCache[cChave],0)	//BuscaChave (OTIMIZAÇÃO)
+	
+		//+-------------------------------------------------------------------------------+
+		//| AO enviar impressao em PDF usando o objeto TMSPrinter o mesmo apresenta erro, |
+		//| desta forma so uso este caso ja tenha sido inicializado antes.                |
+		//+-------------------------------------------------------------------------------+
+		If	nPos == 0 .And. ;
+			lFWMSPDF .And. ;
+        	nTipoTam == nTM_TMSPRINTER
+        	
+			nTipoTam	:= nTM_FWFONTSIZE
+			
+			cChave		:= _GetChave(oFonte,nTipoTam)
+
+			//+------------------------------------------------+
+			//| Busca a fonte armazenada no array (otimizacao) |
+			//+------------------------------------------------+
+			nPos	:= IIF(jFontCache:hasProperty(cChave),jFontCache[cChave],0) //BuscaChave (OTIMIZAÇÃO)
+		EndIf
+
+		//------------------------------------------------------------------------------------------------------
+
+		//+--------------------------------------+
+		//| Se nao achou a fonte inclui no array |
+		//+--------------------------------------+
+		If nPos <= 0
+	    	
+	    	//+-----------------------------------------------------------+
+			//| Inicializacao das classes e propriedades para os calculos |
+			//+-----------------------------------------------------------+
+
+			//------------------------------------------------------------------------------------------------------
+
+			//+---------------------------------------------------------------+
+			//| O objeto FWFontCst sempre deve ser inicializado para que      |
+			//| salve os tamanhos da fonte em arquivo, e assim depois o       |
+			//| relatorio possa ser impresso em pdf via job quando necessario |
+			//+---------------------------------------------------------------+
+			//Inicializa objeto oFontSize
+			If oFontSize == NIL
+				oFontSize	:= FWFontCst():New(lJob)
+			//Seta novamente o atributo lInJob (pode ter mudado)
+			Else
+				If Select(oFontSize:cArqTrab) == 0 	// Se o arquivo de trabalho foi fechado reabre (erro no schedule)
+					oFontSize:CriaTabela() 			// Reabre/recria a tabela
+				EndIf
+				oFontSize:lInJob	:= lJob
+			EndIf
+
+			//Inicializa os tamanhos da fonte
+			oFontSize:IniciaFont(@oFonte)
+
+			//------------------------------------------------------------------------------------------------------
+
+			//Se calculos com TMSPrinter
+			If nTipoTam == nTM_TMSPRINTER
+
+				// Se objeto nao for TMSPrinter Inicializa o temporario
+				If 	.Not. lTMSPrinter .And. ;
+					.Not. lFWMSPDF                 //Se for pdf nao pode usar o TMSPrinter
+					
+					//Inicializa a classe
+					If oTMSPrinter == NIL
+						oTMSPrinter	:= TMSPrinter():New()
+					EndIf
+	
+					//Objeto para obter os tamanhos do texto
+					oTemp			:= @oTMSPrinter
+				EndIf
+		
+	//			If oTemp:nLogPixelY() == 0 //Erro de exeucao quando via Job/Console no servidor
+	//				lAjusteTMS	:= .T.
+	//			EndIf
+
+			//Usando clase FWMSPrinter
+			ElseIf nTipoTam == nTM_FWMSPRINTER
+				
+//				oPrinter:SetParm("-RFS")   //Parametro orientado pela Totvs SP, nao foi necessario, e ao mexer nele muda os tamanhos de fontes
+				
+			//Usando a classe FWFontSize
+			ElseIf nTipoTam == nTM_FWFONTSIZE
+
+				//---------------------------------------------------------------------------------
+		
+				//+------------------------------------------------+
+				//| Busca a fonte armazenada no array (otimizacao) |
+				//+------------------------------------------------+
+				nPos	:= @oFontSize:BuscaFonte(cChave)
+				
+				//Guarda o array com os tamanhos da fonte (OTIMIZACAO)
+				If nPos > 0                                           
+					//Usa como referencia para economizar memoria
+					aTamFont	:= @oFontSize:aFontSize[nPos][nFS_ATAMFON]
+				EndIf
+	
+			EndIf
+			
+			//-------------------------------------------------------------------------------------
+		
+			//Se o array nao esta inicializado pela classe FWFontCst
+			If Len(aTamFont) == 0
+	
+				//Monta array com os tamanhos de cada caractere
+			 	For nX := 1 To 255
+					
+					If 	nX < 32 .Or. ;
+						nX > 254
+
+						cChar	:= space(1)
+					Else
+						cChar	:= Chr(nX)
+					EndIf
+					
+					If   cChar <> space(1) .Or. ;
+						( cChar == space(1) .And. unTamEsp == NIL )
+
+						//Usando a classe FWFontSize
+						If nTipoTam == nTM_FWFONTSIZE
+				 		
+				 			//aAdd( aTamFont, oFontSize:getTextWidth( cChar , cFonte, nWidth, lBold, lItalic ) )
+				 			aAdd( aTamFont, oFontSize:NewGetTextWidth( cChar , @oFonte ) )
+
+						//Se calculos com FWMSPrinter
+						ElseIf nTipoTam == nTM_FWMSPRINTER
+							//oTemp:GetTextWidth( cChar , @oFonte )
+							aAdd( aTamFont, U_FWTamFon( cChar , @oFonte ) ) //Calculo orientado por SP
+						
+						//TmsPrinter
+						Else
+//				 			aAdd( aTamFont, oPrinter:oPrint:GetTextWidth( cChar , @oFonte ) )
+				 			aAdd( aTamFont, oTemp:GetTextWidth( cChar , @oFonte ) )
+						EndIf			
+
+						//Se for espaco em branco otimiza o tamanho guardando o tamanho
+						If 	cChar == Space(1) .And. ;
+							unTamEsp == NIL
+
+							unTamEsp	:= aTail(aTamFont)
+					   EndIf
+
+					Else
+			      	//Tamanho do espaco em branco
+						aAdd( aTamFont, unTamEsp )
+					EndIf
+				Next
+				
+			EndIf
+	
+			//------------------------------------------------------------------------------------------------------
+	
+			//Forca tamanho zero para os caracteres CR e LF (Quebra de linha)
+			aTamFont[13]	:= 0 //Quebra de linha
+			aTamFont[10]	:= 0 //Retorno de linha
+			
+			//Guarda no array (OTIMIZACAO)
+			aAdd(aFontSize,array(nFS_TAMTOT))
+			nPos	:= len(aFontSize)
+			aFontSize[nPos][nFS_FONTE]	:= cFonte
+			aFontSize[nPos][nFS_WIDTH] 	:= nWidth
+			aFontSize[nPos][nFS_HEIGHT]	:= nHeight
+			aFontSize[nPos][nFS_BOLD]	:= lBold
+			aFontSize[nPos][nFS_ITALIC]	:= lItalic
+		//	aFontSize[nPos][nFS_LFONTS]	:= lFWFontSize
+			aFontSize[nPos][nFS_TPFONT] := nTipoTam
+			aFontSize[nPos][nFS_ATAMFON]:= aTamFont
+			
+			jFontCache[cChave]	:= nPos	//Otimização
+		EndIf
+
+		//------------------------------------------------------------------------------------------------------
+
+		//+--------------------------------------------------------------+
+		//| Calcula o fator de correcao do tamanho, ajuste para melhorar |
+		//| a precisao dos calculos da totvs.                            |
+		//+--------------------------------------------------------------+
+		
+		If nWidth == 0	//As fontes as vezes não vem com os tamanhos definidos preciso ajustar aqui
+			nWidth	:= nHeight
+		EndIf
+
+		//Se calculos com TMSPrinter
+		If nTipoTam == nTM_TMSPRINTER
+			If lFWMSPrinter
+				//Compatibilidade com a classe TMSPrinter
+				If lAdjustToLegacy
+					If lFWMSPDF
+						nFator 	/= 1.15
+					Else
+						nFator 	/= 1.21
+					EndIf
+				Else
+					nFator	/= oTemp:nFactorHor
+					If lFWMSPDF
+						nFator	*= 1.15
+					Else
+						nFator	*= 1.10
+					EndIf
+				EndIf
+			EndIf
+		
+		//Usando clase FWMSPritner
+		ElseIf nTipoTam == nTM_FWMSPRINTER
+
+			nFator	*= 1.01 //Pequeno ajuste no tamanho pois as vezes fica um pouco maior
+
+			//Compatibilidade com a classe TMSPrinter
+/*			If lAdjustToLegacy
+				If lFWMSPDF
+					nFator 	/= 1.00
+				Else
+					nFator 	/= 1.05
+				EndIf
+			Else
+				nFator	/= oTemp:nFactorHor
+				If lFWMSPDF
+					nFator	*= 1.25
+				Else
+					nFator	*= 1.25
+				EndIf
+			EndIf
+*/
+		//Usando a classe FWFontSize
+		ElseIf nTipoTam == nTM_FWFONTSIZE
+
+			//Compatibilidade com a classe TMSPrinter
+			If lAdjustToLegacy
+				nFator	*= oTemp:nFactorHor
+				If lFWMSPDF
+					nFator 	/= 1.67
+				Else
+					nFator 	/= 1.64
+				EndIf
+			Else
+				If lFWMSPDF
+	//				nFator	/= (460/337)
+					nFator	/= 1.33
+				Else
+					nFator	/= 1.30
+				EndIf
+			EndIf
+
+		EndIf
+
+		//Gambiarra para ajustar a impressao
+		If nTipoTam == nTM_FWFONTSIZE //.Or. nTipoTam == nTM_FWMSPRINTER
+			If nWidth == 8 //Bug no tamanho 8
+				nFator	/= 1.10
+			//Ajuste de fonte maior que 8
+			ElseIf nWidth >= 09 .And. ;
+				! (Upper(cFonte) $ 'COURIER')
+				nFator	/= 1.25
+	
+				//Ajuste de fonte conforme a resolucao customizada
+				If Type('oTemp:nResolution') == 'N'
+					nFator	*= ( oTemp:nResolution / 72 )
+				EndIf
+			EndIf
+		EndIf
+			
+	//------------------------------------------------------------------------------------------------------
+		//+--------------------------+
+		//| Calcula tamanho do texto |
+		//+--------------------------+
+		nTamFont	:= 0
+		For nX := 1 to len(cTexto)
+			nTamFont	+= aFontSize[nPos][nFS_ATAMFON][ASC(Substr(cTexto,nX,1))]
+		Next
+
+		//Fator de correcao
+		nTamFont	*= nFator
+	Else
+		nTamFont	:= len(cTexto)
+	EndIf
+	
+Return nTamFont

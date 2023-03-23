@@ -1,0 +1,527 @@
+#INCLUDE "Protheus.ch"
+#INCLUDE "RWMake.ch"
+#INCLUDE "FWPrintSetup.ch"
+#INCLUDE "RPTDEF.CH"
+#INCLUDE "ParmType.ch"
+//#INCLUDE 'MSObject.ch'
+#INCLUDE 'tlpp-object.th'
+#INCLUDE "CXInclude.ch"
+#INCLUDE "CXMSPrinter.ch"
+
+//#############################################################################
+//##+==========+=============+=======+=================+======+=============+##
+//##|Programa  | tCXRelGraf  | Autor | Cirilo Rocha    | Data | 10/03/2017  |##
+//##+==========+=============+=======+=================+======+=============+##
+//##|Descr.    | Classe utilizada para inicializar os dados para impressao  |##
+//##|          | de relatorios graficos usando CXMSPrinter                  |##
+//##+==========+===========+================================================+##
+//##|   DATA   |Programador| Manutenção Efetuada                            |##
+//##+==========+===========+================================================+##
+//##| 21/03/17 | Cirilo R. | Adicionado atributo com o path do pdf          |##
+//##|          |           | Correcao de erro log via job                   |##
+//##| 29/11/17 | Cirilo R. | Migrados processos de carregar e salvar        |##
+//##|          |           | parametros de impressao para CXPrintSetup      |##
+//##| 10/08/18 | Cirilo R. | Pequena revisao no fonte                       |##
+//##| 25/11/20 | Cirilo R. | Tratamento de erros                            |##
+//##| 28/12/22 | Cirilo R. | Ajustes para o retorno da classe FWPrintSetup  |##
+//##|          |           | Migrada classe para Tlpp                       |##
+//##|          |           | Correção do travamento quando usando o parâme- |##
+//##|          |           |  tro lDisabeSetup                              |##
+//##| 07/01/23 | Cirilo R. | Melhoria na tela de Setup                      |##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##+==========+===========+================================================+##
+//#############################################################################
+Class tCXRelGraf
+
+	PUBLIC DATA cClassName		AS Character
+
+	PUBLIC DATA aOrder			AS Array		// Vetor com as opcoes de Ordem
+	PUBLIC DATA nOrder			AS Numeric		// Numerico "Passado por Referencia" que recebera o Item Selecionado
+
+	PUBLIC DATA cPerg			AS Character	// cPerg se for utilizado
+	PUBLIC DATA aPerg			AS Array		// Dados das perguntas
+	PUBLIC DATA bPerg			AS CodeBlock	// Block de codigo para chamar as perguntas
+
+	PUBLIC DATA cNomeProg		AS Character
+	PUBLIC DATA cTitulo 		AS Character 	// Titulo do relatorio para impressao
+	PUBLIC DATA lInJob	  		AS Logical		// Indica se a impressao e' vai JOB (NO SERVIDOR)
+	PUBLIC DATA lAdjustToLegacy	AS Logical		// Ajuste para utilizar as mesmas coordenadas da classe TMSPrinter (COMPATIBILIDADE)
+
+	PUBLIC DATA _lBoxLegacy		AS Logical		// Define se os Box serao impressos pelo modo antigo, com fundo branco
+
+	//---------------------------------------------------------------------------------------------
+
+	//+----------------------------------+
+	//| Parametros do objeto FWMSPrinter |
+	//+----------------------------------+
+	PUBLIC DATA lRaw			AS Logical		// Enviar para a dispositivo de impressao caracteres binários(RAW)
+	PUBLIC DATA lTReport		AS Logical		// Indica que a classe foi chamada pelo TReport.
+	PUBLIC DATA lPDFAsPNG		AS Logical		// Indica que será gerado o PDF no formato PNG
+	PUBLIC DATA lDisabeSetup	AS Logical		// Inibe tela de setup
+	PUBLIC DATA cDirPrint		AS Character	// Diretorio de impressao temporario
+	PUBLIC DATA cPathDest		AS Character	// Diretorio para gravacao do PDF gerado
+	PUBLIC DATA cArqRel			AS Character
+
+	//+------------------------------+
+	//| Flags do objeto FWPrintSetup |
+	//+------------------------------+
+	PUBLIC DATA lDsDestination	AS Logical
+	PUBLIC DATA lDsPaperSize    AS Logical
+	PUBLIC DATA lDsMargin       AS Logical
+	PUBLIC DATA lIsTotvsPrinter	AS Logical
+	PUBLIC DATA lDsOrientation	AS Logical
+
+	//Controles de salvamento da secao e valores DEFAULT para impressao
+	PUBLIC DATA cDevice			AS Character
+	PUBLIC DATA nDestination	AS Numeric
+	PUBLIC DATA nPrintType      AS Numeric
+	PUBLIC DATA nOrientation    AS Numeric
+	PUBLIC DATA nPaperSize      AS Numeric
+	PUBLIC DATA lPreview		AS Logical
+	PUBLIC DATA aMargens        AS Array
+
+	//+-------------------+
+	//| Objeto PrintSetup |
+	//+-------------------+
+	PUBLIC DATA oStp			AS Object
+	PUBLIC DATA oRpt			AS Object
+	PUBLIC DATA lSetup			AS Variant /*Logical*/ //Pode ser NIL
+
+	//---------------------------------------------------------------------------------------------
+	PUBLIC METHOD New() 		Constructor
+	PUBLIC METHOD Inicializa()
+	PUBLIC METHOD ClassName()	AS Character
+	PUBLIC METHOD Destroy()
+
+EndClass
+
+//#############################################################################
+//##+==========+================+=======+==============+======+=============+##
+//##|Programa  | New(Construtor)| Autor | Cirilo Rocha | Data | 10/03/2017  |##
+//##+==========+================+=======+==============+======+=============+##
+//##|Descricao | Customizado para inicializar e compatibilizar as proprieda-|##
+//##|          | des customizadas                                           |##
+//##+==========+===============+============================================+##
+//##|   DATA   | Programador   | Manutencao Efetuada                        |##
+//##+==========+===============+============================================+##
+//##|          |               |                                            |##
+//##|          |               |                                            |##
+//##|          |               |                                            |##
+//##+==========+===============+============================================+##
+//#############################################################################
+Method New() Class tCXRelGraf
+
+	::cNomeProg	:= U_CXTxtMsg()  //FunName()
+	::cNomeProg	:= Left(::cNomeProg,At('(',::cNomeProg)-1)
+	
+	If Type('Titulo') == 'C'
+		::cTitulo		:= Titulo
+	ElseIf Type('cCadastro') == 'C'
+		::cTitulo		:= cCadastro
+	Else
+		::cTitulo		:= ::cNomeProg
+	EndIf
+
+//	::aOrder			:= NIL 	// Vetor com as opcoes de Ordem
+	::nOrder			:= 1	// Numerico "Passado por Referencia" que recebera o Item Selecionado
+
+	::aPerg				:= {}
+	::cPerg				:= ''
+
+	::lInJob	  		:= .F.	// Indica se a impressao e' via JOB (NO SERVIDOR)
+	::lAdjustToLegacy	:= .F. 	// Ajuste para utilizar as mesmas coordenadas da classe TMSPrinter (COMPATIBILIDADE)
+	//::lSetup			:= .T.	// Mostra tela de setup
+	
+	::_lBoxLegacy		:= .F.
+
+	//---------------------------------------------------------------------------------------------
+
+	//+----------------------------------+
+	//| Parametros do objeto FWMSPrinter |
+	//+----------------------------------+
+//	::lRaw				:= NIL
+	::lTReport		  	:= .F. 							// Indica que a classe foi chamada pelo TReport.
+	::lPDFAsPNG			:= .T. 							// Indica que será gerado o PDF no formato PNG
+	::lDisabeSetup		:= .F. 							// Inibe tela de setup
+	::cDirPrint			:= FwSuperGetMV('MV_RELT')		// Diretorio de impressao temporario
+	::cPathDest			:= cPathDest					// Diretorio para salvar os arquivos PDF
+
+	//+------------------------------+
+	//| Flags do objeto FWPrintSetup |
+	//+------------------------------+
+	::lIsTotvsPrinter	:= .T.
+	::lDsOrientation	:= .T.
+	::lDsPaperSize		:= .T.
+	::lDsMargin			:= .T.
+	::lDsDestination	:= .T.
+
+	//Valores DEFAULT para impressao
+	::nDestination		:= AMB_CLIENT
+	::nOrientation		:= nPD_RETRATO
+	::nPaperSize		:= U_CXConvPSize(DMPAPER_A4,'F') //Converte de FWMsPrinter p/ TMSPrinter
+	::lPreview			:= .T.
+	::aMargens			:= {00,00,00,00}
+
+	//CRIA VARIAVEIS UTILIZADAS NA IMPRESSAO DO RELATORIO
+
+	//+------------------------------+
+	//| Variavel objeto de impressao |
+	//+------------------------------+
+	_SetOwnerPrvt('oRpt')
+
+	//+-----------------------------------------------------------+
+	//| Variaveis de posicionamento da pagina (margens, tamanhos) |
+	//+-----------------------------------------------------------+
+
+	//Variavel para controle de linhas
+	_SetOwnerPrvt('nLin')
+	_SetOwnerPrvt('nIncLin',0)
+
+	//Tamanhos da pagina
+	_SetOwnerPrvt('nHP') //Tamanho horizontal da pagina (sem margens)
+	_SetOwnerPrvt('nVP') //Tamanho vertical da pagina (sem margens)
+
+	//Margens da pagina
+	_SetOwnerPrvt('nHM') //Margem horizontal da pagina
+	_SetOwnerPrvt('nVM') //Margem vertical da pagina
+
+	_SetOwnerPrvt('nFH') //Final horizontal 	(nHP-nHM)
+	_SetOwnerPrvt('nFV') //Final vertical		(nVP-nVM)
+
+	_SetOwnerPrvt('nLP') //Largura disponivel para impressao	(nFH-nHM) ou (nHP-2*nHM)
+	_SetOwnerPrvt('nAP') //Altura  disponivel para impressao	(nFV-nVM) ou (nVP-2*nVM)
+
+	::cClassName	:= 'tCXRelGraf'
+
+Return Self
+
+//#############################################################################
+//##+==========+================+=======+==============+======+=============+##
+//##|Programa  | Inicializa     | Autor | Cirilo Rocha | Data | 13/03/2017  |##
+//##+==========+================+=======+==============+======+=============+##
+//##|Descricao | Usado para inicializar os dados da classe CXMSPrinter      |##
+//##+==========+===============+============================================+##
+//##|   DATA   | Programador   | Manutencao Efetuada                        |##
+//##+==========+===============+============================================+##
+//##|          |               |                                            |##
+//##|          |               |                                            |##
+//##|          |               |                                            |##
+//##+==========+===============+============================================+##
+//#############################################################################
+Method Inicializa(lAuto);	//01 lAuto
+					Class tCXRelGraf
+
+	//Declaracao de variaveis----------------------------------------------------------------------
+	Local aParDef		AS Array
+	Local lTemPerg		AS Logical
+	Local nFlags		AS Numeric
+	Local nPos			AS Numeric
+	Local xValor		AS Variant
+
+	//Inicializa variaveis-------------------------------------------------------------------------
+	lTemPerg	:= .F.
+	nFlags		:= 0
+
+	//Parametros da rotina-------------------------------------------------------------------------
+	ParamType 0		VAR lAuto	  	  		AS Logical			Optional Default .F.
+
+	//---------------------------------------------------------------------------------------------
+	If ::lInJob
+		lAuto		:= .T.
+	EndIf
+
+	//Aqui o tratamento é o seguinte: lSetup tem prioridade sobre lDisabeSetup, então se ele não for
+	// informado explicitamente (<> NIL) vou buscar do lDisabeSetup, se ele foi informado então é 
+	// para considerar o que foi informado
+	If ValType(::lSetup) <> 'L'
+		::lSetup	:= ( .Not. ::lDisabeSetup )
+	EndIf
+
+	//Em rotinas automaticas ou Job nao pode chamar o setup
+	If ::lInJob .Or. ;
+		lAuto
+		
+		::lSetup	:= .F.
+	EndIf
+
+	//---------------------------------------------------------------------------------------------
+
+	If ValType(::cArqRel) <> 'C' .Or. ;
+		Empty(FileNoExt(::cArqRel))
+
+		::cArqRel	:= Upper(::cNomeProg)+'_'+DtoS(Date())+'_'+StrTran(Time(),':','')
+	EndIf
+
+	//---------------------------------------------------------------------------------------------
+
+	//Ajustes nas funcoes CXQuebraPag e CXSay
+	aCabec		:= Nil		//Variavel do CXQuebraPag
+	U_CXSay(,,'',,,,,'L') 	//Forca a limpeza da variavel de controle interno
+
+	//---------------------------------------------------------------------------------------------
+
+	If ::lInJob
+		::lIsTotvsPrinter	:= .T.
+		::lDsOrientation	:= .T.
+		::lDsPaperSize		:= .T.
+		::lDsMargin			:= .T.
+		::lDsDestination	:= .T.
+	EndIf
+
+	//---------------------------------------------------------------------------------------------
+	If ::lDsOrientation
+		nFlags	+= PD_DISABLEORIENTATION
+	EndIf
+
+	If ::lDsDestination
+		nFlags	+= PD_DISABLEDESTINATION
+	EndIf
+
+	If ::lDsPaperSize
+		nFlags	+= PD_DISABLEPAPERSIZE
+	EndIf
+
+	If ::lIsTotvsPrinter
+		nFlags	+= PD_ISTOTVSPRINTER
+	EndIf
+
+	If ::lDsMargin
+		nFlags	+= PD_DISABLEMARGIN
+	EndIf
+
+	//---------------------------------------------------------------------------------------------
+	//+-----------------------------------+
+	//| Posicoes do array de Propriedades |
+	//| PD_DESTINATION = 1                |
+	//| PD_PRINTTYPE   = 2                |
+	//| PD_ORIENTATION = 3                |
+	//| PD_PAPERSIZE   = 4                |
+	//| PD_PREVIEW     = 5                |
+	//| PD_VALUETYPE   = 6                |
+	//| PD_MARGIN      = 7                |
+	//+-----------------------------------+
+	aParDef	:= Array(7)
+	aParDef[PD_DESTINATION]	:= ::nDestination
+
+	If 	ValType(::nPrintType) == 'N' .And. ; 			//Valor informado?
+		::nPrintType <> 0
+	
+		::cDevice	:= aDevice[::nPrintType]
+	ElseIf 	ValType(::cDevice) == 'C' .And. ; 			//Valor informado?
+			.Not. Empty(::cDevice)
+		
+		nPos	:= aScan(aDevice,::cDevice)
+		If nPos > 0
+			::nPrintType	:= nPos
+		Else	//Valores Default
+			::nPrintType		:= IMP_SPOOL
+			::cDevice			:= 'SPOOL'
+		EndIf
+	Else		//Valores Default
+		::nPrintType		:= IMP_SPOOL
+		::cDevice			:= 'SPOOL'
+	EndIf
+
+	aParDef[PD_PRINTTYPE  ]	:= ::nPrintType
+
+	aParDef[PD_ORIENTATION]	:= ::nOrientation
+	aParDef[PD_PAPERSIZE  ]	:= ::nPaperSize
+	If ::nPrintType == IMP_PDF
+		aParDef[PD_PREVIEW    ]	:= ::lPreview
+		aParDef[PD_VALUETYPE  ]	:= 'C:\temp\'
+	Else
+		aParDef[PD_PREVIEW    ]	:= ::lPreview
+		aParDef[PD_VALUETYPE  ]	:=  ''
+	EndIf
+	aParDef[PD_MARGIN     ]	:= ::aMargens
+
+	//---------------------------------------------------------------------------------------------
+
+	If 	ValType(::aPerg) == 'A' .And. ;
+		Len(::aPerg) > 0
+
+		//Cria perguntas
+		If ValType(::cPerg) <> 'C' .Or. ;
+			Empty(::cPerg)
+
+			::cPerg	:= ::cNomeProg
+		EndIf
+
+		U_CXPergunta(::aPerg,::cPerg)
+	EndIf
+
+	//Chama perguntas
+	If 	ValType(::cPerg) == 'C' .And. ;
+		.Not. Empty(::cPerg) .And. ;
+		.Not. lAuto .And. ;
+		.Not. ::lInJob
+
+		::bPerg		:= {|| Pergunte( ::cPerg , .T. )}
+		lTemPerg	:= .T.
+
+	ElseIf	 ValType(::bPerg) == 'B' .And. ;
+			.Not. Empty(::bPerg)
+
+		lTemPerg	:= .T.
+	EndIf
+
+	If 	lTemPerg .And. ;
+		::lSetup
+
+		xValor	:= Eval(::bPerg)
+
+		If ValType(xValor) == 'L' .And. ;
+			.Not. xValor
+			Return .F.
+		EndIf
+	EndIf
+
+	//+----------------------------------------------------------------------+
+	//| Inicializacao do objeto Setup Print com as propriedades de impressao |
+	//+----------------------------------------------------------------------+
+	::oStp	:= CXPrintSetup():New(	nFlags				,;	//01
+									::cTitulo			,;	//02
+									::lInJob .Or. lAuto	,;	//03
+									::cNomeProg			,;	//04
+									aParDef				 )	//05
+
+	If lTemPerg
+		//Botao parametros (se nao for utilizar comentar a linha abaixo
+		::oStp:SetUserParms(::bPerg)
+	EndIf
+
+	//CONFIGURAR AS ORDENS DO RELATORIO
+	If 	ValType(::aOrder) == 'A' .And. ;
+		Len(::aOrder) > 0 .And. ;
+		.Not. ::lInJob
+
+		::oStp:SetOrderParms ( ::aOrder, @::nOrder )
+	EndIf
+
+	//Execusao via rotina Job
+	If ::lInJob
+		//+----------------------------------+
+		//| Seta propriedades para impressao |
+		//+----------------------------------+
+		::oStp:SetProperty(PD_DESTINATION	,AMB_SERVER	) 	// Indica impressão via Server (.REL Não será copiado para o Client)
+		::oStp:SetProperty(PD_PRINTTYPE		,IMP_PDF   	) 	// Tipo de impressao
+
+		::oStp:aOptions[PD_VALUETYPE]	:= ::cPathDest		// Precisa ser informado desta forma para não ocorrer erros no objeto
+		::oStp:cQtdCopia	:= '01'
+	ElseIf lAuto .And. ;
+		::oStp:GetProperty(PD_PRINTTYPE  ) == IMP_PDF
+
+		::oStp:aOptions[PD_VALUETYPE]	:= ::cPathDest		// Precisa ser informado desta forma para não ocorrer erros no objeto
+		::oStp:cQtdCopia	:= '01'
+	EndIf
+
+	//---------------------------------------------------------------------------------------------
+
+	//+---------------------------------------------------------+
+	//| Inicializacao do objeto FWMSPrinter e suas propriedades |
+	//+---------------------------------------------------------+
+
+	//Se em PDF no cliente -> forca a visualizacao
+	If 	::oStp:GetProperty(PD_PRINTTYPE  ) == IMP_PDF 		.And. ;
+		::oStp:GetProperty(PD_DESTINATION) == AMB_CLIENT
+
+		::oStp:SetProperty(PD_PREVIEW,.T.)
+	EndIf
+
+	//Cria novo objeto CXMSPrinter baseado FWMSPrinter com algumas melhorias
+	::oRpt	:= CXMSPrinter():New(::cArqRel								  		,;	//01 Nome do arquivo temporaria de impressao
+								 ::oStp:GetProperty(PD_PRINTTYPE)  				,;  //02 Tipo de impressao (spool,pdf,etc.)
+								 ::lAdjustToLegacy						  		,;  //03 Ajuste para utilizar as mesmas coordenadas da classe TMSPrinter (COMPATIBILIDADE)
+								 ::cDirPrint									,;  //04 Diretorio de impressao temporario
+								 .Not. ::lSetup					  				,;  //05 Inibe a tela de setup na abertura do objeto (Def .T.)
+								 ::lTReport 									,;  //06 Indica que a classe foi chamada pelo TReport.
+								 @::oStp									  	,;  //07 Objeto FWPrintSetup instanciado pelo usuário
+								 ::oStp:GetProperty(PD_VALUETYPE)  				,;  //08 Impressora selecionada
+								 ::oStp:GetProperty(PD_DESTINATION)==AMB_SERVER ,;  //09 Indica impressao no servidor (console)
+								 ::lPDFAsPNG		  						  	,;  //10 Indica que sera gerado o PDF no formato PNG
+								 ::lRaw				  						  	,;  //11 Enviar para a dispositivo de impressao caracteres binários(RAW)
+								 ::oStp:GetProperty(PD_PREVIEW)					,;  //12 Desabilita o preview do PDF
+								 Val(::oStp:cQtdCopia)				  			)   //13 Quantidade de copias
+
+	//Execusao via rotina Job
+	If 	::lInJob .Or. ;
+		lAuto
+
+		//Seta diretorio para salvar PDF
+		::oRpt:cPathPDF	:= ::oStp:GetProperty(PD_VALUETYPE)
+	EndIf
+
+	//Erros na geração do relatório
+	If 	ValType(::oRpt) <> 'O' .Or. ;
+		::oRpt:_lErro
+		
+		::Destroy()	//Limpa memória
+		Return .F.
+	EndIf
+
+	//Usuário cancelou a tela de Setup
+	If ::oRpt:nModalResult == PD_CANCEL
+		::Destroy()	//Limpa memória
+		Return .F.
+	EndIf
+
+	//Impressao no servidor
+	::oRpt:lInJob 		:= ::lInJob
+	::oRpt:_lBoxLegacy	:= ::_lBoxLegacy
+	::oRpt:cNomeProg	:= ::cNomeProg
+
+	//Resolucao 75 dpi (compatibilidade)
+	::oRpt:SetResolution(75) //Necessario para o correto posicionamento dos elementos na pagina
+
+	//::oRpt:SetParm("-RFS")  //Parametro orientado pela Totvs SP, nao usado porque distorceu a impressao em alguns tamanhos de fonte
+
+	oRpt	:= ::oRpt
+
+Return .T.
+
+//#############################################################################
+//##+==========+=============+=======+=================+======+=============+##
+//##|Programa  | ClassName   | Autor | Cirilo Rocha    | Data | 01/12/2015  |##
+//##+==========+=============+=======+=================+======+=============+##
+//##|Descricao | Metodo para retornar o nome da classe atual                |##
+//##+==========+===============+============================================+##
+//##|   DATA   | Programador   | Manutencao Efetuada                        |##
+//##+==========+===============+============================================+##
+//##|          |               |                                            |##
+//##|          |               |                                            |##
+//##|          |               |                                            |##
+//##+==========+===============+============================================+##
+//#############################################################################
+Method ClassName() Class tCXRelGraf
+
+Return ::cClassName
+
+//#############################################################################
+//##+----------+--------------+-------+-------------------+------+----------+##
+//##|Programa  | Destroy      | Autor | Cirilo Rocha      | Data |28/12/2022|##
+//##+----------+--------------+-------+-------------------+------+----------+##
+//##|Descr.    | Método destrutor da classse para limpar os objetos internos|##
+//##|          |  utilizados (como o CXPrintSetup)                          |##
+//##+----------+---------------+--------------------------------------------+##
+//##|   DATA   | Programador   | Manutenção efetuada                        |##
+//##+----------+---------------+--------------------------------------------+##
+//##|          |               |                                            |##
+//##|          |               |                                            |##
+//##+----------+---------------+--------------------------------------------+##
+//#############################################################################
+Method Destroy() Class tCXRelGraf
+	
+	If ValType(::oRpt) == 'O'
+		::oRpt:Destroy()
+		FWFreeVar(::oRpt)
+	EndIF
+	If ValType(::oStp) == 'O'
+		::oStp:Destroy()
+		FWFreeVar(::oStp)	//Destroi o CXPrintSetup
+	EndIf
+	If ValType(::aPerg) == 'A'
+		FwFreeArray(::aPerg)
+	EndIf
+
+Return

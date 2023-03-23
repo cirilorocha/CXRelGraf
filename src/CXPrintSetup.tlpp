@@ -1,0 +1,632 @@
+#Include "Protheus.ch"
+#Include "RWMake.ch"
+#INCLUDE "RPTDEF.CH"
+#INCLUDE "FWPrintSetup.ch"
+#Include "ParmType.ch"
+//#INCLUDE 'MSObject.ch'
+#INCLUDE 'tlpp-object.th'
+#Include "CXInclude.ch"
+#INCLUDE "CXMSPrinter.ch"
+
+//#############################################################################
+//##+==========+==============+=======+================+======+=============+##
+//##|Programa  | CXPrintSetup | Autor | Cirilo Rocha   | Data |  02/04/2012 |##
+//##+==========+==============+=======+================+======+=============+##
+//##|Desc.     | Este objeto e' um espelho para substituir o original       |##
+//##|          | FWPrintSetup, Pois esta classe padrao estava bloqueando    |##
+//##|          | o fechamento da tela do sistema apos o envio dos emails    |##
+//##|          | manualmente.                                               |##
+//##+==========+===========+================================================+##
+//##|   DATA   |Programador| Manutenção Efetuada                            |##
+//##+==========+===========+================================================+##
+//##| 20/12/12 | Cirilo R. | Adicionada variável com o titulo do relatório  |##
+//##| 10/03/16 | Cirilo R. | Pequena revisão no fonte e documentação        |##
+//##| 29/11/17 | Cirilo R. | Ajustes para carregar e salvar informações da  |##
+//##|          |           |  impressão, antes era no fonte tCXRelGraf      |##
+//##| 10/08/18 | Cirilo R. | Pequena revisão no fonte                       |##
+//##| 28/12/22 | Cirilo R. | Migrada classe para Tlpp                       |##
+//##| 24/01/23 | Cirilo R. | Ajustes de compatibilidade com a classe origi- |##
+//##|          |           |  nal em ADVPL                                  |##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##+==========+===========+================================================+##
+//#############################################################################
+Class CXPrintSetup From FWPrintSetup
+
+	//PUBLIC DATA cClassName		AS Character	//NÃO RECOMENDÁVEL EM CLASSES HERDADAS
+
+	//Variaveis internas, usado o _ para nao correr o risco de conflito com nomes padrao da classe FWPrintSetup
+	PUBLIC Data _lInJob			AS Logical
+	PUBLIC Data _cTitulo		AS Character
+	PUBLIC Data _cSession		AS Character
+	PUBLIC Data _aParDef		AS Array
+	PUBLIC Data _cImpDef		AS Character
+	PUBLIC Data _cPathPDF		AS Character
+
+	PRIVATE Data _lActivate		AS Logical
+
+	//Metodos sobrepoe os padroes
+	PUBLIC METHOD New() 				Constructor
+	PUBLIC METHOD Activate()			AS Numeric
+	PUBLIC METHOD SetProperty()
+	PUBLIC METHOD SetPropert()			//Compatibilidade ADVPL
+	PUBLIC METHOD GetProperty()
+	PUBLIC METHOD GetPropert()			//Compatibilidade ADVPL
+	PUBLIC METHOD ShowDeviceCtrl()
+
+	PUBLIC METHOD GetSecao()
+	PUBLIC METHOD GrvSecao()
+
+	//Metodos customizados
+	//PUBLIC METHOD ClassName()			AS Character	//NÃO RECOMENDÁVEL EM CLASSES HERDADAS
+	PUBLIC METHOD Destroy()
+	
+EndClass
+
+//-------------------------------------------------------------------------------------------------
+//+----------------------------+
+//| Valores de Flags           |
+//| PD_ISTOTVSPRINTER     =  1 |
+//| PD_DISABLEDESTINATION =  2 |
+//| PD_DISABLEORIENTATION =  4 |
+//| PD_DISABLEPAPERSIZE   =  8 |
+//| PD_DISABLEPREVIEW     = 16 |
+//+----------------------------+
+Method New(	nFlags	,;	//01 nFlags
+			cTitulo	,;	//02 cTitulo
+			lJob	,;	//03 lJob
+			cFunName,;	//04 cFunName
+			aParDef ;	//05 aParDef
+				)Class CXPrintSetup
+
+	//Parametros da rotina-------------------------------------------------------------------------
+	ParamType 0		VAR nFlags		 	AS Numeric			Optional Default 0
+	ParamType 1		VAR cTitulo  	  	AS Character		Optional Default ''
+	ParamType 2		VAR lJob			AS Logical			Optional Default .F.  //Impressao via Job (customizado)
+	ParamType 3		VAR cFunName		AS Character		Optional Default FunName()
+	ParamType 4		VAR aParDef			AS Array			Optional Default {}
+
+	::_lInJob	:= lJob
+	::_cTitulo	:= cTitulo
+	::_cPathPDF	:= 'C:\Temp\'	//Diretorio padrao PDF
+	::_cImpDef	:= ''
+
+	//---------------------------------------------------------------------------------------------
+	If ValType(aParDef) <> 'A'
+		aParDef	:= {}
+	EndIf
+	aSize(aParDef,7)
+	::_aParDef	:= aClone(aParDef)
+
+	//Parametros default
+	If ValType(::_aParDef[PD_DESTINATION]) <> 'N'
+		::_aParDef[PD_DESTINATION]	:= AMB_CLIENT
+	EndIf
+	If ValType(::_aParDef[PD_PRINTTYPE]) <> 'N'
+		::_aParDef[PD_PRINTTYPE]	:= IMP_SPOOL
+	EndIf
+	If ValType(::_aParDef[PD_ORIENTATION]) <> 'N'
+		::_aParDef[PD_ORIENTATION]	:= nPD_RETRATO
+	EndIf
+	If ValType(::_aParDef[PD_PAPERSIZE]) <> 'N'
+		//+-----------------------------------------------------------------+
+		//| Preciso converter o tamanho DMPAPER_A4 usado no FWMSPrinter     |
+		//| para o formato do TMSPrinter, porque este objeto (FWPrintSetup) |
+		//| trabalha com o formato do TMSPrinter.                           |
+		//+-----------------------------------------------------------------+
+		::_aParDef[PD_PAPERSIZE]	:= U_CXConvPSize(DMPAPER_A4,'F') //Converte de FWMsPrinter p/ TMSPrinter
+	EndIf
+	If ValType(::_aParDef[PD_PREVIEW]) <> 'L'
+		::_aParDef[PD_PREVIEW]		:= .T.
+	EndIf
+	If ValType(::_aParDef[PD_VALUETYPE]) <> 'C'
+		::_aParDef[PD_VALUETYPE]  	:= ''
+	EndIf
+	If ValType(::_aParDef[PD_MARGIN]) <> 'A'
+		::_aParDef[PD_MARGIN]		:= {20,20,20,20}
+	EndIf
+
+	//---------------------------------------------------------------------------------------------
+	If lJob
+		::aOptions		:= Array(7)
+		::cQtdCopia		:= '01'
+		::nFlags		:= nFlags
+		::nModalResult	:= PD_CANCEL
+		::nRemoteType	:= 1 			//SmartClient Windows
+
+//		::aOptions[PD_PAPERSIZE]	:= U_CXConvPSize(DMPAPER_A4,'F')
+//		::aOptions[PD_PREVIEW]		:= .F.
+//		::aOptions[PD_VALUETYPE]  	:= ''
+//		::aOptions[PD_MARGIN]		:= {20,20,20,20} //Precisa ter esta margem no pdf
+
+	//Se nao for via Job chama o construtor
+	Else
+		::_cSession	:= GetPrinterSession()+'_'+cFunName
+
+		_Super:New(nFlags,cTitulo)
+	EndIf
+
+	//Inicializa variaveis
+	::aOptions[PD_DESTINATION]	:= ::_aParDef[PD_DESTINATION]
+	::aOptions[PD_PRINTTYPE]	:= ::_aParDef[PD_PRINTTYPE]
+	::aOptions[PD_ORIENTATION]	:= ::_aParDef[PD_ORIENTATION]
+	::aOptions[PD_PAPERSIZE]	:= ::_aParDef[PD_PAPERSIZE]
+	::aOptions[PD_PREVIEW]		:= ::_aParDef[PD_PREVIEW]
+	::aOptions[PD_VALUETYPE]	:= ::_aParDef[PD_VALUETYPE]
+	::aOptions[PD_MARGIN]		:= ::_aParDef[PD_MARGIN]
+
+	//::cClassName	:= 'CXPrintSetup'
+
+	::_lActivate	:= .F.
+
+Return ::Self
+
+//##################################################################################################
+//##+========+=================================+=======+====================+======+=============+##
+//##|Programa| SetProperty                     | Autor | Cirilo Rocha       | Data |   /  /      |##
+//##+========+=================================+=======+====================+======+=============+##
+//##|Desc.   | Sobreposição do método padrão, usado para permitir execução via Job               |##
+//##+========+==========+========================================================================+##
+//##|  DATA  | ANALISTA | MANUTENÇÃO EFETUADA                                                    |##
+//##+========+==========+========================================================================+##
+//##|        |          |                                                                        |##
+//##|        |          |                                                                        |##
+//##|        |          |                                                                        |##
+//##+========+==========+========================================================================+##
+//##################################################################################################
+//+-----------------------------------+
+//| Posicoes do array de Propriedades |
+//| PD_DESTINATION = 1                |
+//| PD_PRINTTYPE   = 2                |
+//| PD_ORIENTATION = 3                |
+//| PD_PAPERSIZE   = 4                |
+//| PD_PREVIEW     = 5                |
+//| PD_VALUETYPE   = 6                |
+//| PD_MARGIN      = 7                |
+//+-----------------------------------+
+Method SetProperty(	nPosicao,;	//01
+					xValor	,;	//02
+					uParam1	,;	//03
+					uParam2	,;	//04
+					uParam3	,;	//05
+					uParam4	,;	//06
+					uParam5	;	//07
+							)Class CXPrintSetup
+
+	//Declaracao de variaveis----------------------------------------------------------------------
+	Local xRet		AS Variant
+
+	//Parametros da rotina-------------------------------------------------------------------------
+	ParamType 0		VAR nPosicao	 		AS Numeric
+	ParamType 1		VAR xValor		 		AS Numeric,Logical,Character,Array
+
+	//---------------------------------------------------------------------------------------------
+	If ::_lInJob
+		::aOptions[nPosicao]	:= xValor
+	Else
+		xRet	:= _Super:SetProperty(	nPosicao,;	//01
+										xValor	,;	//02
+										uParam1	,;	//03
+										uParam2	,;	//04
+										uParam3	,;	//05
+										uParam4	,;	//06
+										uParam5	) 	//07
+	EndIf
+
+	//Compatibilidade com objeto padrão, se não ativado entende que estas são configurações default!
+	If .Not. ::_lActivate
+		::_aParDef[nPosicao]	:= xValor
+	EndIf
+
+Return xRet
+
+//##################################################################################################
+//##+========+=================================+=======+====================+======+=============+##
+//##|Programa| SetPropert                      | Autor | Cirilo Rocha       | Data |   /  /      |##
+//##+========+=================================+=======+====================+======+=============+##
+//##|Desc.   | Sobreposição do método padrão, usado como compatibilidade com a classe original   |##
+//##|        |  em ADVPL onde o mesmo pode ser chamado por este nome incompleto e funciona       |##
+//##+========+==========+========================================================================+##
+//##|  DATA  | ANALISTA | MANUTENÇÃO EFETUADA                                                    |##
+//##+========+==========+========================================================================+##
+//##|        |          |                                                                        |##
+//##|        |          |                                                                        |##
+//##|        |          |                                                                        |##
+//##+========+==========+========================================================================+##
+//##################################################################################################
+Method SetPropert(	nPosicao,;	//01
+					xValor	,;	//02
+					uParam1	,;	//03
+					uParam2	,;	//04
+					uParam3	,;	//05
+					uParam4	,;	//06
+					uParam5	;	//07
+							)Class CXPrintSetup
+
+Return ::SetProperty(nPosicao,;	//01
+					xValor	,;	//02
+					uParam1	,;	//03
+					uParam2	,;	//04
+					uParam3	,;	//05
+					uParam4	,;	//06
+					uParam5	)	//07
+
+//##################################################################################################
+//##+========+=================================+=======+====================+======+=============+##
+//##|Programa| GetProperty                     | Autor | Cirilo Rocha       | Data |   /  /      |##
+//##+========+=================================+=======+====================+======+=============+##
+//##|Desc.   | Sobreposição do método padrão, usado para permitir execução via Job               |##
+//##+========+==========+========================================================================+##
+//##|  DATA  | ANALISTA | MANUTENÇÃO EFETUADA                                                    |##
+//##+========+==========+========================================================================+##
+//##|        |          |                                                                        |##
+//##|        |          |                                                                        |##
+//##|        |          |                                                                        |##
+//##+========+==========+========================================================================+##
+//##################################################################################################
+Method GetProperty(	nPosicao,;	//01
+					uParam1	,;	//02
+					uParam2	,;	//03
+					uParam3	,;	//04
+					uParam4	,;	//05
+					uParam5	;	//06
+							)Class CXPrintSetup
+
+	//Declaracao de variaveis----------------------------------------------------------------------
+	Local xRet		AS Variant
+
+	//Parametros da rotina-------------------------------------------------------------------------
+	ParamType 0		VAR nPosicao	 		AS Numeric
+
+	//---------------------------------------------------------------------------------------------
+	If ::_lInJob
+		xRet	:= ::aOptions[nPosicao]
+	Else
+		xRet	:= _Super:GetProperty(	nPosicao,;	//01
+										uParam1	,;	//02
+										uParam2	,;	//03
+										uParam3	,;	//04
+										uParam4	,;	//05
+										uParam5	) 	//06
+	Endif
+
+Return xRet
+
+//##################################################################################################
+//##+========+=================================+=======+====================+======+=============+##
+//##|Programa| GetPropert                      | Autor | Cirilo Rocha       | Data |   /  /      |##
+//##+========+=================================+=======+====================+======+=============+##
+//##|Desc.   | Sobreposição do método padrão, usado como compatibilidade com a classe original   |##
+//##|        |  em ADVPL onde o mesmo pode ser chamado por este nome incompleto e funciona       |##
+//##+========+==========+========================================================================+##
+//##|  DATA  | ANALISTA | MANUTENÇÃO EFETUADA                                                    |##
+//##+========+==========+========================================================================+##
+//##|        |          |                                                                        |##
+//##|        |          |                                                                        |##
+//##|        |          |                                                                        |##
+//##+========+==========+========================================================================+##
+//##################################################################################################
+Method GetPropert(	nPosicao,;	//01
+					xValor	,;	//02
+					uParam1	,;	//03
+					uParam2	,;	//04
+					uParam3	,;	//05
+					uParam4	,;	//06
+					uParam5	;	//07
+							)Class CXPrintSetup
+
+Return ::GetProperty(nPosicao,;	//01
+					xValor	,;	//02
+					uParam1	,;	//03
+					uParam2	,;	//04
+					uParam3	,;	//05
+					uParam4	,;	//06
+					uParam5	)	//07
+
+//#############################################################################
+//##+==========+=============+=======+=================+======+=============+##
+//##|Programa  | Activate    | Autor | Cirilo Rocha    | Data | 01/12/2015  |##
+//##+==========+=============+=======+=================+======+=============+##
+//##|Descr.    | Metodo para exibir a tela de configuracao de impressao     |##
+//##|          | Feito assim para salvar os parametros de impressao         |##
+//##+==========+===========+================================================+##
+//##|   DATA   |Programador| Manutenção Efetuada                            |##
+//##+==========+===========+================================================+##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##+==========+===========+================================================+##
+//#############################################################################
+Method Activate(uParam1	,;	//01
+                uParam2	,;	//02
+                uParam3	,;	//03
+                uParam4	,;	//04
+                uParam5	;	//05
+						)Class CXPrintSetup
+
+    //Declaracao de variaveis----------------------------------------------------------------------
+	Local nModalResult		AS Numeric
+
+	//---------------------------------------------------------------------------------------------
+	If .Not. ::_lInJob
+		//Carrega dados da secao salva-------------------------------------------------------------
+		::GetSecao()
+
+		nModalResult	:= _Super:Activate(	uParam1	,;	//01
+											uParam2	,;	//02
+											uParam3	,;	//03
+											uParam4	,;	//04
+											uParam5	) 	//05
+
+		//Grava dados da secao de impressao
+		If nModalResult == PD_OK
+			::GrvSecao()
+		EndIf
+	EndIf
+
+	::_lActivate	:= .T.
+
+Return nModalResult
+
+//#############################################################################
+//##+==========+=============+=======+=================+======+=============+##
+//##|Programa  | ClassName   | Autor | Cirilo Rocha    | Data | 01/12/2015  |##
+//##+==========+=============+=======+=================+======+=============+##
+//##|Descr.    | Metodo para retornar o nome da classe atual                |##
+//##+==========+===========+================================================+##
+//##|   DATA   |Programador| Manutenção Efetuada                            |##
+//##+==========+===========+================================================+##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##+==========+===========+================================================+##
+//#############################################################################
+//Method ClassName() Class CXPrintSetup
+//
+//Return ::cClassName
+
+//#############################################################################
+//##+==========+=============+=======+=================+======+=============+##
+//##|Programa  | GetSecao    | Autor | Cirilo Rocha    | Data | 29/11/2017  |##
+//##+==========+=============+=======+=================+======+=============+##
+//##|Descr.    | Metodo para carregar o profile de impressão                |##
+//##+==========+===========+================================================+##
+//##|   DATA   |Programador| Manutenção Efetuada                            |##
+//##+==========+===========+================================================+##
+//##| 24/04/18 | Cirilo R. | Adicionada gravação da quantidade de cópias    |##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##+==========+===========+================================================+##
+//#############################################################################
+Method GetSecao()	Class CXPrintSetup
+
+	//Declaracao de variaveis----------------------------------------------------------------------
+	Local xValor		AS Variant
+
+	//Controles de salvamento da secao e valores DEFAULT para impressao
+	Local aMargens      AS Array
+	Local cDevice		AS Character
+	Local cQtdCopia		AS Character
+	Local cValueType    AS Character
+	Local lPreview      AS Logical
+	Local nDestination	AS Numeric
+	Local nPrintType    AS Numeric
+	Local nOrientation  AS Numeric
+	Local nPaperSize    AS Numeric
+
+	//Inicializa variaveis-------------------------------------------------------------------------
+	nDestination	:= ::_aParDef[PD_DESTINATION]
+	nPrintType    	:= ::_aParDef[PD_PRINTTYPE]
+	nOrientation  	:= ::_aParDef[PD_ORIENTATION]
+	nPaperSize    	:= ::_aParDef[PD_PAPERSIZE]
+	lPreview      	:= ::_aParDef[PD_PREVIEW]
+	cValueType    	:= ::_aParDef[PD_VALUETYPE]
+	aMargens      	:= ::_aParDef[PD_MARGIN]
+	cQtdCopia		:= ::cQtdCopia
+
+	//---------------------------------------------------------------------------------------------
+	//Valores default
+	If ::_aParDef[PD_PRINTTYPE] == IMP_SPOOL
+		::_cImpDef	:= ::_aParDef[PD_VALUETYPE]
+	ElseIf 	::_aParDef[PD_PRINTTYPE] == IMP_PDF .And. ;
+			.Not. Empty(::_aParDef[PD_VALUETYPE])
+
+		::_cPathPDF	:= ::_aParDef[PD_VALUETYPE]
+	EndIf
+
+	//+---------------------------------------------------+
+	//| Carrega informacoes do profile de impressao salvo |
+	//+---------------------------------------------------+
+	//If NAnd(::nFlags,PD_DISABLEORIENTATION) == 0 	//NAO ESTA COM FLAG
+	If .Not. ::HasBit(PD_DISABLEORIENTATION) 		//NAO ESTA COM FLAG
+		xValor	:= AllTrim(fwGetProfString(::_cSession,"ORIENTATION"	,aOrientation[::_aParDef[PD_ORIENTATION]],.T.))
+
+		nPos	:= aScan(aOrientation,xValor)
+		If nPos > 0
+			nOrientation	:= nPos
+		EndIf
+	EndIf
+
+	//If NAnd(::nFlags,PD_DISABLEDESTINATION) == 0	//NAO ESTA COM FLAG
+	If .Not. ::HasBit(PD_DISABLEDESTINATION) 		//NAO ESTA COM FLAG
+		xValor	:= fwGetProfString(::_cSession,"LOCAL"		,aLocal[::_aParDef[PD_DESTINATION]]		,.T.)
+
+		nPos	:= aScan(aLocal,xValor)
+		If nPos > 0
+			nDestination	:= nPos
+		EndIf
+	EndIf
+
+	//If NAnd(::nFlags,PD_DISABLEPAPERSIZE) == 0		//NAO ESTA COM FLAG
+	If .Not. ::HasBit(PD_DISABLEPAPERSIZE) 				//NAO ESTA COM FLAG
+		xValor	:= Val(fwGetProfString(::_cSession,"PAPERSIZE"	,StrZero(::_aParDef[PD_PAPERSIZE],2)	,.T.))
+		If xValor > 0
+			nPaperSize	:= xValor
+		EndIf
+	EndIf
+
+	cDevice	:= fwGetProfString(::_cSession,"PRINTTYPE" 	,aDevice[::_aParDef[PD_PRINTTYPE]]			,.T.)
+	If Empty(cDevice)
+		cDevice		:= "SPOOL"
+	EndIf
+
+	nPrintType	:= aScan(aDevice,{|x| x == cDevice })
+	If nPrintType <= 0
+		nPrintType	:= IMP_SPOOL
+	EndIf
+
+	If 	.Not. ::_lInJob .And. ;
+		::aOptions[PD_DESTINATION] == AMB_CLIENT .And. ;
+		nPrintType == IMP_PDF
+
+		lPreview	:= .T.
+	EndIf
+
+	::_cImpDef	:= fwGetProfString(::_cSession,"DEFAULT_IMP" 	,::_cImpDef		,.T.)
+	::_cPathPDF	:= fwGetProfString(::_cSession,"DEFAULT_PDF" 	,::_cPathPDF	,.T.)
+
+	If nPrintType == IMP_SPOOL
+		cValueType	:= ::_cImpDef
+	ElseIf nPrintType == IMP_PDF
+		cValueType	:= ::_cPathPDF
+	EndIf
+
+	xValor	:= Val(fwGetProfString(::_cSession,"QTDCOPIA"	,::cQtdCopia,.T.))
+	If xValor > 0
+		cQtdCopia	:= StrZero(xValor,2)
+	Else
+		cQtdCopia	:= '01'
+	EndIf
+	
+	aMargens[1]	:= Val(fwGetProfString(::_cSession,"MARG1"	,StrZero(aMargens[1],2),.T.))
+	aMargens[2]	:= Val(fwGetProfString(::_cSession,"MARG2"	,StrZero(aMargens[2],2),.T.))
+	aMargens[3]	:= Val(fwGetProfString(::_cSession,"MARG3"	,StrZero(aMargens[3],2),.T.))
+	aMargens[4]	:= Val(fwGetProfString(::_cSession,"MARG4"	,StrZero(aMargens[4],2),.T.))
+
+	//-------------------------------------------------------------------------
+	//Precisa seguir esta seguencia e estes comandos senao nao funciona
+	::SetProperty(PD_DESTINATION,nDestination)
+	::SetProperty(PD_PRINTTYPE	,nPrintType)
+	::SetProperty(PD_ORIENTATION,nOrientation)
+	::SetProperty(PD_PAPERSIZE	,nPaperSize)
+	::SetProperty(PD_PREVIEW	,lPreview)
+	::SetProperty(PD_MARGIN		,aMargens)
+	::cQtdCopia	:= cQtdCopia
+
+	If .Not. Empty(cValueType)
+	//	::SetProperty(PD_VALUETYPE	,cValueType)
+		::aOptions[PD_VALUETYPE]	:= cValueType  	// Precisa ser informado desta forma para não ocorrer erros no objeto
+	EndIf
+
+Return
+
+//#############################################################################
+//##+==========+================+=======+==============+======+=============+##
+//##|Programa  | ShowDeviceCtrl | Autor | Cirilo Rocha | Data | 04/12/2017  |##
+//##+==========+================+=======+==============+======+=============+##
+//##|Descr.    | Metodo que controla as propriedades da impressao           |##
+//##|          |                                                            |##
+//##|          | CUSTOMIZADO PARA CARREGAR OS ULTIMOS LOCAIS SELECIONADOS   |##
+//##|          | PELO USUARIO                                               |##
+//##+==========+===========+================================================+##
+//##|   DATA   |Programador| Manutenção Efetuada                            |##
+//##+==========+===========+================================================+##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##+==========+===========+================================================+##
+//#############################################################################
+Method ShowDeviceCtrl(	nType	,;	//01
+						uParam1	,;	//02
+		                uParam2	,;	//03
+		                uParam3	,;	//04
+		                uParam4	,;	//05
+		                uParam5	;	//06
+							)Class CXPrintSetup
+
+	//Declaracao de variaveis----------------------------------------------------------------------
+	Local xRet		AS Variant
+
+	//Parametros da rotina-------------------------------------------------------------------------
+	ParamType 0		VAR nType	 		AS Numeric
+
+	//---------------------------------------------------------------------------------------------
+	xRet	:= _Super:ShowDeviceCtrl(	nType	,;	//01
+										uParam1	,;	//02
+										uParam2	,;	//03
+										uParam3	,;	//04
+										uParam4	,;	//05
+										uParam5	 )	//06
+	If nType == IMP_SPOOL
+		If .Not. Empty(::_cImpDef)
+			::aOptions[PD_VALUETYPE]	:= ::_cImpDef
+		EndIf
+	ElseIf nType == IMP_PDF
+		If .Not. Empty(::_cPathPDF)
+			::aOptions[PD_VALUETYPE]	:= ::_cPathPDF
+		EndIf
+	EndIf
+
+Return xRet
+
+//#############################################################################
+//##+==========+=============+=======+=================+======+=============+##
+//##|Programa  | GrvSecao    | Autor | Cirilo Rocha    | Data | 29/11/2017  |##
+//##+==========+=============+=======+=================+======+=============+##
+//##|Descr.    | Metodo para salvar o profile de impressao                  |##
+//##+==========+===========+================================================+##
+//##|   DATA   |Programador| Manutenção Efetuada                            |##
+//##+==========+===========+================================================+##
+//##| 24/04/18 | Cirilo R. | Adicionada gravacao da quantidade de cópias    |##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##+==========+===========+================================================+##
+//#############################################################################
+Method GrvSecao() Class CXPrintSetup
+
+	//---------------------------------------------------------------------------------------------
+	fwWriteProfString( ::_cSession, "PRINTTYPE"  	, aDevice[::GetProperty(PD_PRINTTYPE)]	, .T. )
+	If .Not. Empty(::aOptions[PD_VALUETYPE])
+		If ::GetProperty(PD_PRINTTYPE) == IMP_SPOOL
+			fwWriteProfString( ::_cSession, "DEFAULT_IMP"	, ::aOptions[PD_VALUETYPE]		, .T. ) //Guarda a impressora selecionada
+			fwWriteProfString( ::_cSession, "QTDCOPIA"		, ::cQtdCopia					, .T. ) //Guarda a quantidade de copias
+		ElseIf ::GetProperty(PD_PRINTTYPE) == IMP_PDF
+			fwWriteProfString( ::_cSession, "DEFAULT_PDF"	, ::aOptions[PD_VALUETYPE]		, .T. ) //Guarda o local selecionado
+		EndIf
+	EndIf
+
+//	If NAnd(::nFlags,PD_DISABLEORIENTATION) == 0 	//NAO ESTA COM FLAG
+	If .Not. ::HasBit(PD_DISABLEORIENTATION) 		//NAO ESTA COM FLAG
+	   fwWriteProfString( ::_cSession, "LOCAL"		, aLocal[::GetProperty(PD_DESTINATION)]	, .T. )
+	EndIf
+//	If NAnd(::nFlags,PD_DISABLEDESTINATION) == 0	//NAO ESTA COM FLAG
+	If .Not. ::HasBit(PD_DISABLEDESTINATION) 		//NAO ESTA COM FLAG
+		fwWriteProfString( ::_cSession, "ORIENTATION", aOrientation[::GetProperty(PD_ORIENTATION)], .T. )
+	  //fwWriteProfString( ::_cSession, "ORIENTATION", StrZero(::GetProperty(PD_ORIENTATION),2)	  , .T. )
+	EndIf
+//	If NAnd(::nFlags,PD_DISABLEPAPERSIZE) == 0		//NAO ESTA COM FLAG
+	If .Not. ::HasBit(PD_DISABLEPAPERSIZE) 			//NAO ESTA COM FLAG
+		fwWriteProfString( ::_cSession, "PAPERSIZE"  , StrZero(::GetProperty(PD_PAPERSIZE),2)	, .T. )
+	EndIf
+
+Return
+
+//#############################################################################
+//##+----------+--------------+-------+-------------------+------+----------+##
+//##|Programa  | Destroy      | Autor | Cirilo Rocha      | Data |28/12/2022|##
+//##+----------+--------------+-------+-------------------+------+----------+##
+//##|Descr.    | Método destrutor da classse para limpar os objetos internos|##
+//##|          |  utilizados (como o _aParDef)                              |##
+//##+----------+-----------+------------------------------------------------+##
+//##|   DATA   |Programador| Manutenção efetuada                            |##
+//##+----------+-----------+------------------------------------------------+##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##+----------+-----------+------------------------------------------------+##
+//#############################################################################
+Method Destroy()				 Class CXPrintSetup
+
+	FWFreeVar(::_aParDef)	//Destroi o _aParDef
+	FWFreeVar(::aOptions)	//Destroi o _aParDef
+
+Return

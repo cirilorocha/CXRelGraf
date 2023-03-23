@@ -1,0 +1,46 @@
+#INCLUDE "Protheus.ch"
+#INCLUDE "RWMake.ch"
+#INCLUDE "topconn.ch"
+#INCLUDE "CXInclude.ch"
+
+//#############################################################################
+//##+----------+----------+-------+-----------------------+------+----------+##
+//##|Programa  | FWTamFon | Autor | Cirilo Rocha          | Data |29/02/2016|##
+//##+----------+----------+-------+-----------------------+------+----------+##
+//##|Descr.    | Feito procedimento de cálculo conforme orientação do ana-  |##
+//##|          |  lista da Totvs passou pelo chamado TSO616                 |##
+//##+----------+-----------+------------------------------------------------+##
+//##|   DATA   |Programador| Manutenção efetuada                            |##
+//##+----------+-----------+------------------------------------------------+##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##+----------+-----------+------------------------------------------------+##
+//#############################################################################
+User Function FWTamFon(	cString	,;	//01 cString	
+						oFonte	);	//02 oFonte	
+							AS Numeric
+	
+	//Declaração de Variáveis----------------------------------------------------------------------
+	Local nTamTxt 	:= 0	AS Numeric
+	Local nTamChar	:= 0	AS Numeric
+
+	//oPrinter:SetParm("-RFS")   //Parametro orientado pela Totvs SP, nao foi necessario funcionou sem isso
+	
+	//+------------------------------------------------------------+
+	//| Feito esse tratamento desta forma porque essa função não   |
+	//|  retorna o tamanho corretamente apenas do caractere espaço.|
+	//| Assim eu calculo usando uma string 'XXX' + cString + 'XXX' |
+	//+------------------------------------------------------------+
+	If 	Left(cString,1) == space(1) .Or. ;
+		Right(cString,1) == space(1)
+
+		nTamChar	:= U_FWTamFon('XXX',oFonte) * 2
+		cString		:= 'XXX'+cString+'XXX'
+	EndIf
+	
+	nTamTxt	:= CalcFieldSize("C",,,"",cString,@oFonte)
+	
+	nTamTxt	-= nTamChar
+	
+Return nTamTxt

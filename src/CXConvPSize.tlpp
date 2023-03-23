@@ -1,0 +1,63 @@
+#Include "Protheus.ch"
+#Include "RWMake.ch"
+#Include "ParmType.ch"
+#Include "CXInclude.ch"
+
+//#############################################################################
+//##+----------+-------------+-------+-----------------+------+-------------+##
+//##|Programa  | CXConvPSize | Autor | Cirilo Rocha    | Data | 10/03/2016  |## 
+//##+----------+-------------+-------+-----------------+------+-------------+##
+//##|Descr.    | Converte os tamanhos de páginas do formato TMSPrinter e    |##
+//##|          |  FWMsPrinter                                               |##
+//##+----------+-----------+------------------------------------------------+##
+//##|   DATA   |Programador| Manutenção efetuada                            |##
+//##+----------+-----------+------------------------------------------------+##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##+----------+-----------+------------------------------------------------+##
+//#############################################################################
+//+----------------------------------------------------------------------------------------------------+
+//| Parametros do TReport vs FWMSPrinter                                                               |
+//| 00-Custom 	                                                                                       |
+//| 01-Letter 		216mm x 279mm -	637 x  823 -> DMPAPER_LETTER 		01 // Letter 8 1/2 x 11 in     |
+//| 02-A4 			210mm x 297mm -	620 x  876 -> DMPAPER_A4			09	// A4 210 x 297 mm         |
+//| 03-A3 			297mm x 420mm -	876 x 1240 -> DMPAPER_A3			08	// A3 297 x 420 mm         |
+//| 04-Executive 	184mm x 267mm -	543 x  788 -> DMPAPER_EXECUTIVE	07	// Executive 7 1/4 x 10 1/2 in |
+//| 05-Tabloid		279mm x 432mm -	823 x 1275 -> DMPAPER_TABLOID		03	// Tabloid 11 x 17 in      |
+//+----------------------------------------------------------------------------------------------------+
+//Array com o De/Para dos tamanhos (TMS | FW)
+Static aTamPaper	:= {	{ 00, 00 } ,;
+							{ 01, 01 } ,;
+							{ 02, 09 } ,;
+							{ 03, 08 } ,;
+							{ 04, 07 } ,;
+							{ 05, 03 } }	AS Array
+//-------------------------------------------------------------------------------------------------
+User Function CXConvPSize(	nTamPaper	AS Numeric	,;	//01 nTamPaper
+					 		cObjeto		AS Character);	//02 cObjeto
+								AS Numeric
+	
+	//Declaração de Variáveis----------------------------------------------------------------------
+	Local nPos								AS Numeric
+	Local nRet	:= 01 /*Default Letter*/	AS Numeric
+	
+	//Parâmetros da Rotina-------------------------------------------------------------------------
+	ParamObg 0		VAR nTamPaper
+	ParamObg 1		VAR cObjeto
+	
+	//Recebe FWMsPrinter e Retorna TMSPrinter------------------------------------------------------
+	If cObjeto == 'F' //FWMsPrinter -> TMSPrinter
+		nPos	:= aScan(aTamPaper,{|x| x[2] == nTamPaper })
+		If nPos > 0
+			nRet	:= aTamPaper[nPos][1]
+		EndIf
+	//Recebe TMSPrinter e Retorna FWMsPrinter------------------------------------------------------
+	Else 					//TMSPrinter -> FWMsPrinter
+		nPos	:= aScan(aTamPaper,{|x| x[1] == nTamPaper })
+		If nPos > 0
+			nRet	:= aTamPaper[nPos][2]
+		EndIf
+	EndIf
+
+Return nRet

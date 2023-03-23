@@ -1,0 +1,518 @@
+#INCLUDE "Protheus.ch"
+#INCLUDE "RWMake.ch"
+#Include "ParmType.ch"
+#Include "tlpp-object.th"
+#include "CXInclude.ch"
+#INCLUDE "CXaTamFont.ch"
+
+//#############################################################################
+//##+----------+-----------+-------+----------------------+------+----------+##
+//##|Programa  | FWFontCst | Autor | Cirilo Rocha         | Data |09/12/2012|##
+//##+----------+-----------+-------+----------------------+------+----------+##
+//##|Descrição | Classe em substituicao da classe padrao FwFontSize, pois   |##
+//##|          | a classe padrao estava dando erros na impressao do danfe   |##
+//##|          | via Job.                                                   |##
+//##|          |                                                            |##
+//##|          | Esta classe guarda os valores padrao do tamanho da fonte   |##
+//##|          | em uma tabela temporaria lida depois via job.              |##
+//##+----------+-----------+------------------------------------------------+##
+//##|   DATA   |Programador| Manutenção efetuada                            |##
+//##+----------+-----------+------------------------------------------------+##
+//##| 10/04/12 | Cirilo R. | Pequeno ajuste para obter o tamanho da classe  |##
+//##|          |           |  padrão quando a execução não for um JOB       |##
+//##| 19/08/12 | Cirilo R. | Criado método GetTamTxt simplificando a utili- |##
+//##|          |           |  zação desta classe                            |##
+//##| 11/10/12 | Cirilo R. | Otimização para armazenar os tamanhos de fonte |##
+//##|          |           |  em um array                                   |##
+//##| 05/06/15 | Cirilo R. | Pequena revisão no fonte                       |##
+//##| 07/03/16 | Cirilo R. | Criado método novo para o cálculo exato do ta- |##
+//##|          |           |  manho da fonte (otimização)                   |##
+//##| 02/04/19 | Cirilo R. | Pequena revisão no fonte                       |##
+//##|          |           | Migrada tabela para o banco de dados           |##
+//##| 26/05/22 | Cirilo R. | Revisão no fonte                               |##
+//##|          |           | Trouxe de volta a tabela para Ctree, pois é    |##
+//##|          |           |  muito mais rápido que usar no SQL Server      |##
+//##| 28/06/22 | Cirilo R. | Pequena revisão no fonte                       |##
+//##| 14/03/23 | Cirilo R. | Otimização para utilizar cache Json            |##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##+----------+-----------+------------------------------------------------+##
+//#############################################################################
+//+-----------------------------------------------------------------------------------------------+
+//| Variáveis compartilhadas (OTIMIZAÇÃO)                                                         |
+//| Não precisam ser recriadas a cada execução da rotina.                                         |
+//| Na primeira vez a rotina alimenta as variáveis                                                |
+//| Nas demais execuções busca os dados armazenados nos arrays.                                   |
+//+-----------------------------------------------------------------------------------------------+
+Static jFontCache	:= JsonObject():New()		AS Json
+//-------------------------------------------------------------------------------------------------
+Class FWFontCst From FWFontSize
+
+	PUBLIC DATA cArqTrab			AS Character
+	//PUBLIC DATA cClassName		AS Character	//NÃO RECOMENDÁVEL EM CLASSES HERDADAS
+	PUBLIC DATA lInJob				AS Logical
+	PUBLIC DATA aFontSize			AS Array
+
+	PRIVATE DATA _lInJob			AS Logical
+	PRIVATE DATA _oFontSize			AS Object
+
+	//PRIVATE DATA _nCPO_CHAVE		AS Numeric
+	//PRIVATE DATA _nCPO_TAM			AS Numeric
+
+	PRIVATE DATA _cDriverTmp		AS Character
+	PRIVATE DATA _cOrdem			AS Character
+
+	PUBLIC METHOD New() 				Constructor
+	PUBLIC METHOD getTamTxt()			AS Numeric
+	PUBLIC METHOD getTextWidth()		AS Numeric
+	PUBLIC METHOD NewGetTextWidth()		AS Numeric
+	PUBLIC METHOD CriaTabela()
+	PUBLIC METHOD IniciaFont()
+	PUBLIC METHOD Destroy()
+	//PUBLIC METHOD ClassName()			AS Character	//NÃO RECOMENDÁVEL EM CLASSES HERDADAS
+	PUBLIC METHOD BuscaFonte()			AS Numeric
+
+	STATIC METHOD NomeTab()				AS Character
+
+EndClass
+
+//-------------------------------------------------------------------------------------------------
+Method New(lJob);	//01
+			Class FWFontCst
+
+	//Parametros da rotina-------------------------------------------------------------------------
+	ParamType 0		VAR lJob  	  		AS Logical			Optional Default U_CXRotAuto(.T.) //.F.
+
+	//Inicializa Variaveis-------------------------------------------------------------------------
+	::cArqTrab		:= ::NomeTab()
+	//::_cOrdem		:= 'FWF_NOME+FWF_WIDTH+FWF_BOLD+FWF_ITALIC+FWF_CARAC'
+	::lInJob		:= lJob
+	::_lInJob		:= U_CXRotAuto(.T.)
+
+	//Forca a correcao do parametro inJob caso seja rotina automatica
+	If 	.Not. ::lInJob .And. ;
+		::_lInJob
+		
+		::lInJob	:= .T.
+	EndIf
+	
+	//Inicializa array de tamanhos de fontes
+	//::cClassName	:= 'FWFontCst'
+
+	::aFontSize		:= {}
+	::_cDriverTmp	:= GetMV('MX_ARQNEWT',.F.,'CTREECDX')
+	::_cOrdem		:= 'FWF_CHAVE'
+
+	//Cria tabela se nao existe
+	::CriaTabela() 
+
+Return Self
+
+//-------------------------------------------------------------------------------------------------
+Method getTextWidth(cTexto		,;	//01 cTexto
+					cName		,;	//02 cName
+					nWidth		,;	//03 nWidth
+					lBold		,;	//04 lBold
+					lItalic 	,;	//05 lItalic
+					lUnderline	);	//06 lUnderLine
+						Class FWFontCst
+
+	//Declaracao de variaveis----------------------------------------------------------------------
+	Local oFonte	AS Object
+	Local nTamTxt	AS Numeric
+
+	//Parametros da rotina-------------------------------------------------------------------------
+	ParamType 0		VAR cTexto			AS Character
+	ParamType 1		VAR cName			AS Character	
+	ParamType 2		VAR nWidth			AS Numeric
+	ParamType 3		VAR lBold			AS Logical
+	ParamType 4		VAR lItalic			AS Logical
+
+	//Inicializa Variaveis-------------------------------------------------------------------------
+	oFonte	:= TFont():New(cName,/*nWidth*/,nWidth,,lBold,,,lUnderline,lItalic)
+	nTamTxt	:= ::NewGetTextWidth( cTexto, @oFonte )
+	
+	//Libera memoria do objeto fonte
+	FreeObj(oFonte)
+	oFonte := Nil
+
+Return nTamTxt
+
+//-------------------------------------------------------------------------------------------------
+Method getTamTxt(	cTexto	,;	//01 cTexto
+					oFonte 	);	//02 oFonte
+						Class FWFontCst
+
+	//Parametros da rotina-------------------------------------------------------------------------
+	ParamType 0		VAR cTexto			AS Character
+	ParamType 1		VAR oFonte			AS Object
+
+Return ::NewGetTextWidth( cTexto, @oFonte )
+
+//##################################################################################################
+//##+========+=================================+=======+====================+======+=============+##
+//##|Programa| NewGetTextWidth                 | Autor | Cirilo Rocha       | Data |   /  /      |##
+//##+========+=================================+=======+====================+======+=============+##
+//##|Desc.   | Novo método para substituir o padrão getTextWidth para permitir execução via Job  |##
+//##+========+==========+========================================================================+##
+//##|  DATA  | ANALISTA | MANUTENÇÃO EFETUADA                                                    |##
+//##+========+==========+========================================================================+##
+//##|        |          |                                                                        |##
+//##|        |          |                                                                        |##
+//##|        |          |                                                                        |##
+//##+========+==========+========================================================================+##
+//##################################################################################################
+Method NewGetTextWidth(	cTexto	,;	//01 cTexto
+						oFonte 	);	//02 oFonte
+							Class FWFontCst
+	
+	//Declaracao de variaveis----------------------------------------------------------------------
+	Local aTamFont		AS Array
+	Local cCaracter		AS Character
+	Local lGravaFW		AS Logical
+	Local lInclui		AS Logical
+	Local nX			AS Numeric
+	Local nTamanho		AS Numeric
+	Local nPos			AS Numeric
+	Local nTamEsp		AS Numeric
+	Local nWidthFon		AS Numeric
+
+	//Parametros da rotina-------------------------------------------------------------------------
+	ParamType 0		VAR cTexto			AS Character
+	ParamType 1		VAR oFonte			AS Object
+	
+	//Inicializa Variaveis-------------------------------------------------------------------------
+	aTamFont	:= {}
+	cCaracter	:= ''
+	cName		:= Upper(AllTrim(oFonte:Name))
+	nTamEsp		:= -1
+
+	//Abre / Cria tabela se nao existe
+	::CriaTabela() 
+
+	//+------------------------------------------------+
+	//| Busca a fonte armazenada no array (OTIMIZACAO) |
+	//+------------------------------------------------+
+	cChave	:= _GetChave(oFonte,nTM_FWFONTSIZE)
+	nPos	:= IIF(jFontCache:hasProperty(cChave),jFontCache[cChave],0)	//BuscaChave (OTIMIZAÇÃO)
+	
+	//+--------------------------------------+
+	//| Se nao achou a fonte inclui no array |
+	//+--------------------------------------+
+	If nPos <= 0
+
+		aTamFont	:= {}
+
+		For nX := 1 to 255
+			
+			//Se nao for caracter valido coloca espaco
+			If 	nX < 32 .Or. ;
+				nX > 254
+				
+				//Espaco em branco
+				cCharacter	:= space(1)
+			Else
+				//Caractere texto
+				cCharacter	:= Chr(nX)
+			EndIf
+			
+			//Busca se a informacao ja consta na tabela de tamanhos
+			(::cArqTrab)->(MsSeek(cChave+StrZero(nX,nTamChar)))	//FWF_CHAVE
+			lInclui		:= .Not. (::cArqTrab)->(Found())
+			lGravaFW	:= .T.
+		
+			//Se for espaco em branco otimiza o tamanho
+			If    cCharacter <> space(1) .Or. ;
+				( cCharacter == space(1) .And. nTamEsp == -1 )
+		
+				//Se execucao via job busca tamanhos na tabela gravada
+				If 	::_lInJob
+					//Como a informacao veio da tabela nao faz a gravacao
+					lGravaFW	:= .F.
+
+					If (::cArqTrab)->(Found()) //Localicou na tabela FWFontSize
+					
+						nTamanho	:= (::cArqTrab)->FWF_TAM 
+						
+					Else
+						UserException(	U_CXTxtMsg()+'ERRO: Classe FWFontCst NÃO pode obter '+;
+										'os tamanhos das fontes quando executada vida job.'+CRLF+;
+										'SOLUÇÃO: IMPRIMA PRIMEIRAMENTE ESTE RELATÓRIO EM TELA '+;
+										'PARA O SISTEMA OBTER OS DADOS NECESSÁRIOS.') //Forca um erro no sistema
+					EndIf
+				//Senao job entao busca do objeto (SE FOR VIA JOB O OBJETO OFONTSIZE GERA ERROS!!!!!)
+				Else
+					If ::_oFontSize == NIL
+						::_oFontSize	:= FWFontSize():New()
+					EndIf
+					nWidthFon	:= oFonte:nWidth
+					If nWidthFon == 0	//A classe FWFontSize só trabalha com uma coordenada de cada vez, preciso ajustar aqui
+						nWidthFon	:= oFonte:nHeight
+					EndIf
+					nTamanho	:= ::_oFontSize:getTextWidth( 	cCharacter		,;
+																cName			,;
+																nWidthFon		,;
+																oFonte:Bold		,;
+																oFonte:Italic	,;
+																oFonte:UnderLine )
+//					nTamanho	:= U_FWTamFon(cCharacter,@oFonte)  //Calculo passado pela Totvs SP
+				EndIf
+
+				//Se for espaco em branco otimiza o tamanho guardando o tamanho
+				If 	cCharacter == space(1) .And. ;
+					nTamEsp == -1
+					
+					nTamEsp	:= nTamanho
+				EndIf
+
+			//Forca tamanho zero para os caracteres CR e LF
+			ElseIf	nX == 13 .Or. ;	//CR - Quebra linha
+					nX == 10		//LF - Retorno de linha
+				
+				nTamanho		:= 0
+
+			//Tamanho do espaco em branco
+			Else
+				nTamanho	:= nTamEsp
+			EndIf
+
+			//Guarda tamanho no array para otimizacao
+			aAdd( aTamFont, nTamanho )
+			
+			//Alterado para somente fazer a alteracao se o tamanho for diferente
+			If 	lGravaFW .And. ;
+				.Not. lInclui 		//Apenas na operação de alteração
+
+				//Apenas se realmente existir valores NÃO zerados
+				lGravaFW	:=  ( nTamanho > 0 ) .And. ( nTamanho <> (::cArqTrab)->FWF_TAM )
+			EndIf
+			
+			//Grava/Atualiza na tabela de tamanhos a fonte atual
+			If lGravaFW
+				cCharacter	:= StrZero(nX,nTamChar)
+				RecLock(::cArqTrab, lInclui )
+					//(::cArqTrab)->(FieldPut(::_nCPO_CHAVE	,cChave+cCharacter))
+					//(::cArqTrab)->(FieldPut(::_nCPO_TAM	,nTamanho))
+					(::cArqTrab)->FWF_CHAVE	:= cChave+cCharacter
+					(::cArqTrab)->FWF_TAM	:= nTamanho
+				(::cArqTrab)->(MsUnLock())
+			EndIf
+		Next
+		
+		//Guarda no array (OTIMIZACAO)-----------------------------------------------------------------
+		aAdd(::aFontSize,array(nFS_TAMTOT))
+		nPos	:= len(::aFontSize)
+		::aFontSize[nPos][nFS_FONTE]	:= Upper(AllTrim(oFonte:Name))
+		::aFontSize[nPos][nFS_WIDTH] 	:= oFonte:nWidth
+		::aFontSize[nPos][nFS_HEIGHT]	:= oFonte:nHeight	//nFS_FWFTHGT		//Mostra que o array é especifíco do FWFontCst
+		::aFontSize[nPos][nFS_BOLD]		:= oFonte:Bold
+		::aFontSize[nPos][nFS_ITALIC]	:= oFonte:Italic
+		::aFontSize[nPos][nFS_LFONTS]	:= .T.
+		::aFontSize[nPos][nFS_TPFONT]	:= nTM_FWFONTSIZE
+		::aFontSize[nPos][nFS_ATAMFON]	:= aClone(aTamFont)
+		
+		jFontCache[_GetChave(oFonte,nTM_FWFONTSIZE)]	:= nPos	//Otimização
+
+	EndIf
+	
+	//+--------------------------+
+	//| Calcula tamanho do texto |
+	//+--------------------------+
+	nTamanho	:= 0
+	For nX := 1 to len(cTexto)
+		nTamanho	+= ::aFontSize[nPos][nFS_ATAMFON][ASC(Substr(cTexto,nX,1))]
+	Next
+
+Return nTamanho
+
+//##################################################################################################
+//##+========+=================================+=======+====================+======+=============+##
+//##|Programa| BuscaFonte                      | Autor | Cirilo Rocha       | Data | 14/03/2023  |##
+//##+========+=================================+=======+====================+======+=============+##
+//##|Desc.   | Otimização no processo de busca utilizando um cache Json                          |##
+//##+========+==========+========================================================================+##
+//##|  DATA  | ANALISTA | MANUTENÇÃO EFETUADA                                                    |##
+//##+========+==========+========================================================================+##
+//##|        |          |                                                                        |##
+//##|        |          |                                                                        |##
+//##|        |          |                                                                        |##
+//##+========+==========+========================================================================+##
+//##################################################################################################
+Method BuscaFonte(	cChave	,;	//01 cChave
+					oFonte	,;	//02 oFonte
+					nTpFonte);	//03 nTpFonte
+						Class FWFontCst
+	
+	//Declaração de Variáveis----------------------------------------------------------------------
+	Local nRet			AS Integer
+
+	//Parametros da rotina-------------------------------------------------------------------------
+	ParamType 0		VAR oFonte			AS Object		Optional Default NIL
+	ParamType 1		VAR cChave			AS Character	Optional Default NIL
+	ParamType 2		VAR nTpFonte		AS Numeric		Optional Default nTM_FWFONTSIZE
+	
+	//---------------------------------------------------------------------------------------------
+	If oFonte == NIL
+		ParamType 1		VAR cChave			AS Character
+	ElseIf cChave == NIL
+		ParamType 0		VAR oFonte			AS Object
+		cChave := _GetChave(oFonte,nTpFonte)
+	EndIf
+	
+	//Busca no cache
+	nRet	:= IIF(jFontCache:hasProperty(cChave),jFontCache[cChave],0) //BuscaChave (OTIMIZAÇÃO)
+
+Return nRet
+
+//##################################################################################################
+//##+========+=================================+=======+====================+======+=============+##
+//##|Programa| CriaTabela                      | Autor | Cirilo Rocha       | Data |   /  /      |##
+//##+========+=================================+=======+====================+======+=============+##
+//##|Desc.   | Faz a criação da tabela temporária necessária a execução via Job                  |##
+//##|        | APÓS INÚMEROS TESTES VERIFIQUEI QUE ESPECIFICAMENTE PARA ESTA UTILIZAÇÃO NÃO EXIS-|##
+//##|        |  TE GANHO DE PERFORMANCE USANDO BANCO DE DADOS (SQL), É MUITO MAIS PERFORMÁTICO   |##
+//##|        |  USANDO CTREE MESMO, NEM O SQLITE TEM VANTAGEM.                                   |##
+//##+========+==========+========================================================================+##
+//##|  DATA  | ANALISTA | MANUTENÇÃO EFETUADA                                                    |##
+//##+========+==========+========================================================================+##
+//##|        |          |                                                                        |##
+//##|        |          |                                                                        |##
+//##|        |          |                                                                        |##
+//##+========+==========+========================================================================+##
+//##################################################################################################
+Method CriaTabela() Class FWFontCst
+	
+	//Declaracao de variaveis----------------------------------------------------------------------
+	Local oArea			AS Object
+	Local aStruct		AS Array
+	Local cNomeIndex	AS Character
+	
+	//Tabela ja aberta?----------------------------------------------------------------------------
+	If Select(::cArqTrab) == 0
+		oArea		:= tCtrlAlias():GetArea()
+		cNomeIndex	:= ::cArqTrab+'1'	//::cArqTrab+RetIndExt()
+
+		aStruct		:= {}
+		aAdd(aStruct,{'FWF_CHAVE'	,'C',nTamChv,0})	//01
+		aAdd(aStruct,{'FWF_TAM' 	,'N',10,4})			//06
+		
+		//Se existe abre a tabela
+		If ::_cDriverTmp $ 'FWTMP/TOPCONN'	//No caso desta rotina não pode ser uma tabela temporária, precisa ser mesmo no banco TOPCONN
+			//Cria arquivo se nao existir
+			If .Not. TCCanOpen(::cArqTrab)
+				FWDBCreate( ::cArqTrab, aStruct,"TOPCONN" ,.T.)
+				//If fError() <> 0 //TRATAMENTO DE ERRO NÃO FUNCIONOU
+				//	UserException(	U_CXTxtMsg()+'Erro ao criar tabela temporária.'+CRLF+;
+				//					'ERRO: '+U_CXDescErro()) //Forca um erro no sistema
+				//EndIf
+			EndIf
+			dbUseArea( .T.,"TOPCONN", ::cArqTrab, ::cArqTrab, .T. , .F.)
+		Else
+			//Cria arquivo se nao existir
+			If .Not. MsFile( ::cArqTrab+GetDBExtension(),,::_cDriverTmp)
+				//MsCreate( ::cArqTrab, aStruct,__LOCALDRIVER)
+				FWDBCreate( ::cArqTrab, aStruct,::_cDriverTmp ,.F.)
+				//If fError() <> 0	//TRATAMENTO DE ERRO NÃO FUNCIONOU
+				//	UserException(	U_CXTxtMsg()+'Erro ao criar tabela temporária.'+CRLF+;
+				//					'ERRO: '+U_CXDescErro()) //Forca um erro no sistema
+				//EndIf
+		
+				//Apaga indice se este estiver orfao
+	//			If File(cNomeIndex)
+	//				FErase(cNomeIndex)
+	//			EndIf
+			EndIf
+			dbUseArea( .T.,::_cDriverTmp, ::cArqTrab, ::cArqTrab, .T. , .F.)
+		EndIf
+	
+		//Arquivo de indice existe? Usa-o
+		If ::_cDriverTmp $ 'FWTMP/TOPCONN'
+			If TCCanOpen(::cArqTrab,cNomeIndex)
+				(::cArqTrab)->(DBSetIndex(cNomeIndex))
+			//Cria indice se nao existir
+			Else
+				(::cArqTrab)->(dbCreateIndex(cNomeIndex,::_cOrdem,&('{ || '+::_cOrdem+' }')))	
+			EndIf
+		Else
+			If File(cNomeIndex+RetIndExt())
+				(::cArqTrab)->(DBSetIndex(cNomeIndex+RetIndExt()))
+			//Cria indice se nao existir
+			Else
+				(::cArqTrab)->(dbCreateIndex(cNomeIndex,::_cOrdem,&('{ || '+::_cOrdem+' }')))	
+			EndIf
+		EndIf
+
+		//Otimização!
+		//::_nCPO_CHAVE	:= (::cArqTrab)->(FieldPos('FWF_CHAVE'))
+		//::_nCPO_TAM		:= (::cArqTrab)->(FieldPos('FWF_TAM'))
+		
+		oArea:RestArea()		//Restaura area
+	EndIf	
+
+Return
+
+//-------------------------------------------------------------------------------------------------
+Method IniciaFont(oFonte);	//01 oFonte
+					Class FWFontCst
+
+	//Parametros da rotina-------------------------------------------------------------------------
+	ParamType 0		VAR oFonte  	  	AS Object
+
+	::NewGetTextWidth(' ',@oFonte )
+
+Return
+
+//#############################################################################
+//##+----------+--------------+-------+-------------------+------+----------+##
+//##|Programa  | NomeTab      | Autor | Cirilo Rocha      | Data |28/06/2022|##
+//##+----------+--------------+-------+-------------------+------+----------+##
+//##|Descr.    | Método estático para obter o nome da tabela de uso interno |##
+//##|          |  desta classe                                              |##
+//##+----------+---------------+--------------------------------------------+##
+//##|   DATA   | Programador   | Manutenção efetuada                        |##
+//##+----------+---------------+--------------------------------------------+##
+//##|          |               |                                            |##
+//##|          |               |                                            |##
+//##+----------+---------------+--------------------------------------------+##
+//#############################################################################
+Method NomeTab() Class FWFontCst
+
+Return 'FWFONTCST'
+
+//#############################################################################
+//##+==========+=============+=======+=================+======+=============+##
+//##|Programa  | ClassName   | Autor | Cirilo Rocha    | Data | 08/06/2022  |##
+//##+==========+=============+=======+=================+======+=============+##
+//##|Descr.    | Metodo para retornar o nome da classe atual                |##
+//##+==========+===============+============================================+##
+//##|   DATA   | Programador   | Manutenção Efetuada                        |##
+//##+==========+===============+============================================+##
+//##|          |               |                                            |##
+//##|          |               |                                            |##
+//##|          |               |                                            |##
+//##+==========+===============+============================================+##
+//#############################################################################
+//Method ClassName()	Class FWFontCst
+//
+//Return ::cClassName
+//NÃO É RECOMENDÁVEL CRIAR ESTE MÉTODO QUANDO A CLASSE É HERDADA, JÁ OCORRERAM PROBLEMAS
+
+//#############################################################################
+//##+----------+--------------+-------+-------------------+------+----------+##
+//##|Programa  | Destroy      | Autor | Cirilo Rocha      | Data |10/06/2022|##
+//##+----------+--------------+-------+-------------------+------+----------+##
+//##|Descr.    | Método destrutor da classse para limpar os objetos internos|##
+//##|          |  utilizados (como o FWFontSize)                            |##
+//##+----------+---------------+--------------------------------------------+##
+//##|   DATA   | Programador   | Manutenção efetuada                        |##
+//##+----------+---------------+--------------------------------------------+##
+//##|          |               |                                            |##
+//##|          |               |                                            |##
+//##+----------+---------------+--------------------------------------------+##
+//#############################################################################
+Method Destroy() Class FWFontCst
+
+	FWFreeVar(::_oFontSize)	//Destroi o FWFontSize
+	::_oFontSize	:= NIL
+
+Return

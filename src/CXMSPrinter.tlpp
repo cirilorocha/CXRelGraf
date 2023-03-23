@@ -1,0 +1,3247 @@
+#INCLUDE "Protheus.ch"
+#INCLUDE "RWMake.ch"
+#INCLUDE "Totvs.ch"
+#INCLUDE "FWPrintSetup.ch"
+#INCLUDE "RptDef.ch"
+//#INCLUDE 'MSObject.ch'
+#INCLUDE 'tlpp-object.th'
+#Include "ParmType.ch"
+#include "CXInclude.ch"
+#INCLUDE "CXMSPrinter.ch"
+
+//#############################################################################
+//##+==========+=============+=======+=================+======+=============+##
+//##|Programa  | CXMSPrinter | Autor | Cirilo Rocha    | Data | 21/08/2012  |##
+//##+==========+=============+=======+=================+======+=============+##
+//##|Descr.    | Objeto espelho do FWMSPrinter, usado em substituição do    |##
+//##|          | mesmo para impressão de Box's vazados, permitindo assim    |##
+//##|          | o uso de impressões com marca d'agua.                      |##
+//##+==========+===========+================================================+##
+//##|   DATA   |Programador| Manutenção Efetuada                            |##
+//##+==========+===========+================================================+##
+//##| 11/10/12 | Cirilo R. | Criados novos métodos para impressão centrali- |##
+//##|          |           |  zado, alinhado a direita e justificado        |##
+//##| 19/12/12 | Cirilo R. | Criados novos metodos BoxTxt e BoxItem para    |##
+//##|          |           |  impressão de box com textos                   |##
+//##|          |           | Pequena revisão no fonte                       |##
+//##| 03/06/15 | Cirilo R. | Revisão geral no fonte                         |##
+//##|          |           | Nova impressão de linhas e box                 |##
+//##|          |           | Melhoria na impressão alinhada a direita e cen-|##
+//##|          |           |  tralizado                                     |##
+//##| 25/11/15 | Cirilo R. | Revisão no fonte                               |##
+//##|          |           | Ainda não esta perfeitamente alinhado o SayC,  |##
+//##|          |           |  SayR com o Say                                |##
+//##| 29/02/16 | Cirilo R. | Sobreposto o método GetTextWidth usando a fun- |##
+//##|          |           |  ção FWTamFon                                  |##
+//##| 09/03/16 | Cirilo R. | Novo método para setar as variáveis de área de |##
+//##|          |           |  impressão                                     |##
+//##|          |           | Pequena melhoria para impressão de texto sim-  |##
+//##|          |           |  ples dentro de um Box                         |##
+//##|          |           | Novo método parar imprimir uma grid para ali-  |##
+//##|          |           |  nhamento                                      |##
+//##| 10/06/16 | Cirilo R. | Melhoria para apagar os arquivos .REL temporá- |##
+//##|          |           |  rios e aguardar a geração/impressão do relató-|##
+//##|          |           |  rio                                           |##
+//##| 30/09/16 | Cirilo R. | Revisão no fonte                               |##
+//##|          |           | Pequenas correções de posicionamento           |##
+//##|          |           | Correções na impressão dem PDF                 |##
+//##|          |           | Ajuste no Say para usar o SayAlign             |##
+//##| 06/10/16 | Cirilo R. | Ajuste para o novo RPO de 2016-10-03           |##
+//##| 22/03/17 | Cirilo R. | Novo ajuste para evitar erros na geração de PDF|##
+//##|          |           |  (devido a operação de exclusão automática     |##
+//##|          |           |  quando o servidor esta sob carga)             |##
+//##| 31/05/17 | Cirilo R. | Pequena revisão no fonte                       |##
+//##| 29/11/17 | Cirilo R. | Pequena revisão no fonte                       |##
+//##| 10/08/18 | Cirilo R. | Pequena revisão no fonte                       |##
+//##| 24/08/18 | Cirilo R. | Tratamento para o erro na criação do arquivo   |##
+//##|          |           |  temporário                                    |##
+//##| 10/04/19 | Cirilo R. | Melhoria criando um processo de remapeamento   |##
+//##|          |           |  de posições, para diminuir as customizações   |##
+//##|          |           |  dos fontes padrão DanfeII, RTMSR35 (Dacte)    |##
+//##| 12/11/21 | Cirilo R. | Pequena revisão no fonte                       |##
+//##| 28/12/22 | Cirilo R. | Pequena revisão no fonte                       |##
+//##|          |           | Implementado método Destroy                    |##
+//##| 07/01/23 | Cirilo R. | Melhoria na tela de Setup                      |##
+//##|          |           | Diversas melhorias internas                    |##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##+==========+===========+================================================+##
+//#############################################################################
+Static	aTamPaper	:= {{ 00 , 'Customizado' 				},;
+						{ 01 , 'Letter 8 1/2 x 11 in'		},;
+						{ 09 , 'A4 210 x 297 mm' 			},;
+						{ 08 , 'A3 297 x 420 mm' 			},;
+						{ 07 , 'Executive 7 1/4 x 10 1/2 in'},;
+						{ 03 , 'Tabloid 11 x 17 in'  		} }		AS Array
+//-------------------------------------------------------------------------------------------------
+Class CXMSPrinter From FWMSPrinter
+
+	//Declaracao de variaveis----------------------------------------------------------------------
+	//PUBLIC DATA cClassName		AS Character	//NÃO RECOMENDÁVEL EM CLASSES HERDADAS
+
+	//+-----------------------------------------+
+	//| Uso interno para impressao do cabecalho |
+	//+-----------------------------------------+
+	PUBLIC DATA cLogo				AS Character
+	PUBLIC DATA cNomeEmp			AS Character
+	PUBLIC DATA cTitulo				AS Character
+	PUBLIC DATA nTab1				AS Numeric
+	PUBLIC DATA nTab2				AS Numeric
+
+	//+-----------------------------------------------------------------------+
+	//| Blocos de codigo para customizar cabecalho, rodape e quebra de pagina |
+	//+-----------------------------------------------------------------------+
+	PUBLIC DATA bCabec				AS CodeBlock		//Ex.: {|nLin| ImpCabec()  }
+	PUBLIC DATA bRodape				AS CodeBlock		//Ex.: {|nLin| ImpRodape() }
+	PUBLIC DATA bFimLinha			AS CodeBlock		//Ex.: {|nLin| ( nLin > nFV )}
+	PUBLIC DATA bQuebraPg			AS CodeBlock		//Ex.: {|nLin,lImpRodape,nEspaco,lForca| QuebraPag(nLin,lImpRodape,nEspaco,lForca) }
+
+	//+-----------------------------------+
+	//| Propriedades da area de impressao |
+	//+-----------------------------------+
+	PUBLIC DATA nHP					AS Numeric		//Tamanho horizontal da pagina (sem margens)
+	PUBLIC DATA nVP					AS Numeric		//Tamanho vertical da pagina (sem margens)
+
+	PUBLIC DATA nHM 				AS Numeric		//Margem horizontal da pagina
+	PUBLIC DATA nVM 				AS Numeric		//Margem vertical da pagina
+
+	PUBLIC DATA nFH 				AS Numeric		//Final horizontal
+	PUBLIC DATA nFV 				AS Numeric		//Final vertical
+
+	PUBLIC DATA nLP 				AS Numeric		//Largura disponivel para impressao
+	PUBLIC DATA nAP 				AS Numeric		//Altura disponivel para impressao
+
+	PUBLIC DATA nMS					AS Numeric		//Ajuste para margem superior (erro em PDF)
+
+	PUBLIC DATA cEspLin				AS Character	//Espessura de linhas no PDF
+	PUBLIC DATA nMult				AS Numeric		//Multiplicador do espacamento entre linhas
+	PUBLIC DATA nResolution			AS Numeric
+	PUBLIC DATA cNomeProg			AS Character
+
+	PUBLIC DATA _lErro				AS Logical
+	PUBLIC DATA _lBoxLegacy			AS Logical		//Define se os Box serao impressos pelo modo antigo, com fundo branco
+	PUBLIC DATA _lSemBmp			AS Logical		//Força não imprimir nenhuma imagem, usado na rotina de impressão do CXImpDanfe!
+
+	//Dados para impressao das assinaturas
+	PUBLIC DATA nQtdCol				AS Numeric
+	PUBLIC DATA nEspAss				AS Numeric
+	
+	PUBLIC DATA _aPos2				AS Array
+	PUBLIC DATA _aPos4				AS Array
+	PUBLIC Data lAjtPDF				AS Logical	//Ajusta erro impressao PDF no servidor
+	
+	PRIVATE Data _cMsgErro			AS Character
+	PRIVATE DATA _cFilePrinter		AS Character
+	PRIVATE Data _oStp				AS Object
+
+	//Variaveis internas
+	PRIVATE Data _oFonte11			AS Object
+	PRIVATE Data _oFonte11N			AS Object
+		
+	PRIVATE Data _oFonte14			AS Object
+	PRIVATE Data _oFonte14N			AS Object
+	
+	//Variaveis internas	
+	PRIVATE Data _nAdjust_Say		AS Numeric
+//	PRIVATE Data _lFWrite			AS Logical
+	PRIVATE Data _lConsole			AS Logical
+	PRIVATE Data _lAjPos			AS Logical
+
+	//---------------------------------------------------------------------------------------------
+	PUBLIC METHOD New() Constructor
+
+	//Metodos Customizados
+	PUBLIC METHOD CXCabec()			AS Numeric
+	PUBLIC METHOD CXRodape()		AS Numeric
+	PUBLIC METHOD CXLine()
+	PUBLIC METHOD CXTamLin()		AS Numeric
+	PUBLIC METHOD CXBox()
+	PUBLIC METHOD CXBoxItens()		AS Numeric
+	PUBLIC METHOD CXBoxTxt()		AS Numeric
+	PUBLIC METHOD CXTxtBx()			AS Numeric
+	PUBLIC METHOD CXLinTxt()		AS Numeric
+	PUBLIC METHOD CXQuebraPag()		AS Numeric
+	PUBLIC METHOD CXAreaImp()
+	PUBLIC METHOD CXImpGrid()
+
+	PUBLIC METHOD SayR()
+	PUBLIC METHOD SayC()
+	PUBLIC METHOD SayJ()			AS Numeric
+	PUBLIC METHOD ConvH()			AS Numeric
+	PUBLIC METHOD ConvV()			AS Numeric
+
+	//Metodos padrao sobrescritos
+	PUBLIC METHOD Line()
+	PUBLIC METHOD Box()
+	PUBLIC METHOD BoxFill()
+	PUBLIC METHOD Say()
+	PUBLIC METHOD GetTextWidth()	AS Numeric
+	PUBLIC METHOD Code128C()
+	PUBLIC METHOD QRCode()
+	PUBLIC METHOD Setup()
+
+	PUBLIC METHOD SayBitmap()
+	PUBLIC METHOD SetPaperSize()
+	PUBLIC METHOD SetResolution()
+
+	PUBLIC METHOD Preview()
+	PUBLIC METHOD Print()
+
+	//PUBLIC METHOD ClassName()	AS Character	//NÃO RECOMENDÁVEL EM CLASSES HERDADAS
+	PUBLIC METHOD Destroy()
+	
+	//Métodos internos
+	PUBLIC METHOD CXImprimir()
+
+	PRIVATE METHOD CXLimpaTmp()		AS Logical
+	PRIVATE METHOD CXApagaArq()		AS Logical
+	PRIVATE METHOD CXAjustaLin()	AS Numeric
+	
+	PRIVATE METHOD CXAjPos2()
+	PRIVATE METHOD CXAjPos4()
+
+EndClass
+
+//#############################################################################
+//##+==========+================+=======+==============+======+=============+##
+//##|Programa  | New(Construtor)| Autor | Cirilo Rocha | Data |   /  /      |##
+//##+==========+================+=======+==============+======+=============+##
+//##|Descr.    | Customizado para inicializar e compatibilizar as proprieda-|##
+//##|          | des customizadas                                           |##
+//##+==========+===========+================================================+##
+//##|   DATA   |Programador| Manutenção Efetuada                            |##
+//##+==========+===========+================================================+##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##+==========+===========+================================================+##
+//#############################################################################
+Method New(	cFilePrinter	,;	//01 Nome do arquivo temporaria de impressao
+			nDevice			,;	//02 Tipo de impressao (spool,pdf,etc.)
+			lAdjustToLegacy	,;	//03 Ajuste para utilizar as mesmas coordenadas da classe TMSPrinter (COMPATIBILIDADE)
+			cPathInServer	,;	//04 Diretorio de impressao temporario
+			lDisabeSetup	,;	//05 Inibe a tela de setup na abertura do objeto (Def .T.)
+			lTReport		,;	//06 Indica que a classe foi chamada pelo TReport.
+			oPrintSetup		,;	//07 Objeto FWPrintSetup instanciado pelo usuário
+			cPrinter		,;	//08 Impressora selecionada
+			lServer			,;	//09 Indica impressao no servidor (console)
+			lPDFAsPNG		,;	//10 Indica que sera gerado o PDF no formato PNG
+			lRaw			,;	//11 Enviar para a dispositivo de impressao caracteres binários(RAW)
+			lViewPDF		,;	//12 Desabilita o preview do PDF
+			nQtdCopies		,;	//13 Quantidade de copias
+			uParam1			,;	//14
+			uParam2			,;	//15
+			uParam3			,;	//16
+			uParam4			,;	//17
+			uParam5 		);	//18
+						Class CXMSPrinter
+
+	//Declaracao de variaveis----------------------------------------------------------------------
+	//Local cPath	:= GetSrvProfString("Startpath","")
+	Local lBuffer		AS Logical
+	Local cNewFile		AS Character
+	Local nX			AS Integer
+
+	//Parametros da rotina-------------------------------------------------------------------------
+	ParamType 0		VAR cFilePrinter 	AS Character
+	ParamType 1		VAR nDevice  	  	AS Numeric		Optional Default NIL //IMP_SPOOL
+	ParamType 2		VAR lAdjustToLegacy AS Logical		Optional Default NIL //.F.
+	ParamType 3		VAR cPathInServer 	AS Character	Optional Default NIL //GetTempPath()
+	ParamType 4		VAR lDisabeSetup 	AS Logical     	Optional Default .F.
+	ParamType 5		VAR lTReport  		AS Logical		Optional Default NIL //.F.
+	ParamType 6		VAR oPrintSetup 	AS Object Class FWPrintSetup,CXPrintSetup 	Optional
+	ParamType 7		VAR cPrinter 		AS Character	Optional Default NIL //""
+	ParamType 8		VAR lServer  		AS Logical 		Optional Default NIL //.F.
+	ParamType 9		VAR lPDFAsPNG 		AS Logical		Optional Default NIL //.T.
+	ParamType 10	VAR lRaw 			AS Logical 		Optional Default NIL //.T.
+	ParamType 11	VAR lViewPDF  		AS Logical 		Optional Default NIL //.T.
+	ParamType 12	VAR nQtdCopies 		AS Numeric 		Optional Default NIL // 1
+
+	//Inicializa variaveis-------------------------------------------------------------------------
+	//::cClassName	:= 'CXMSPrinter'  	//Nome da classe
+	::_lErro		:= .F.
+	::_lBoxLegacy	:= .F.
+	::_lSemBmp		:= .F.
+	lErro			:= .F.
+	::_cMsgErro		:= ''
+	::_aPos2		:= {}
+	::_aPos4		:= {}
+
+	//Variaveis compartilhadas de mensagens de erro
+	cMsgErr		:= IIf(Type('cMsgErr')<>'C','',cMsgErr)
+	cCodErr		:= IIf(Type('cCodErr')<>'C','',cCodErr)
+	cSoluc		:= IIf(Type('cSoluc')<>'C','',cSoluc)
+	cMsg		:= IIf(Type('cMsg')<>'C','',cMsg)
+
+//	::_lFWrite	:= GetAPOInfo('FWMsPrinter.prw')[4] < CtoD('13/09/16') //Novo modo de escrita no arquivo
+//	::_lConsole	:= IsBlind()		//Funcao executada sem interface (JOB/Server)
+	::_lConsole	:= U_CXRotAuto()	//Funcao executada sem interface (JOB/Server)
+
+	::_lAjPos	:= .F.
+
+	If Empty(::cNomeProg)
+		::cNomeProg	:= U_CXTxtMsg()  //FunName()
+		::cNomeProg	:= Left(::cNomeProg,At('(',::cNomeProg)-1)
+	EndIf
+
+	//Chama tela de setup--------------------------------------------------------------------------
+	If oPrintSetup <> NIL
+		::_oStp	:= @oPrintSetup
+	EndIf
+
+	If .Not. lDisabeSetup
+		::Setup()
+
+		If ::nModalResult <> PD_CANCEL	//Clicou em OK recarrega variáveis
+			nDevice		:= ::_oStp:GetProperty(PD_PRINTTYPE) //02
+			cPrinter	:= ::_oStp:GetProperty(PD_VALUETYPE) //08
+			lServer		:= ::_oStp:GetProperty(PD_DESTINATION)==AMB_SERVER //09
+			lViewPDF	:= ::_oStp:GetProperty(PD_PREVIEW) //12
+			nQtdCopies	:= Val(::_oStp:cQtdCopia) //13
+		EndIf
+	EndIf
+
+	//O 7 PARÂMETRO DEVERIA RECEBER UM OBJETO FWPRINTSETUP, PORÉM, SE PASSAR ALGUM OBJETO NESSA 
+	//  POSIÇÃO O SISTEMA FICA TRAVADO! ALÉM DO FATO DE QUE NÃO É POSSÍVEL DEIXAR OS PARÂMETROS
+	//  PADRÃO DO SETUP PREVIAMENTE ALIMENTADOS OU FAZER QUALQUER TIPO DE RESTIÇÃO USANDO OS FLAGS
+	//  DO SETUP. PARA RESOLVER ENTÃO DEIXO lDisabeSetup = .T. E oPrintSetup = NIL
+
+	//Chama construtor da classe pai (FWMSPrinter)-------------------------------------------------
+	_Super:New(	cFilePrinter			,;	// 01
+				nDevice					,;	// 02
+				lAdjustToLegacy			,;	// 03
+				cPathInServer			,;	// 04
+				.T./*::lDisabeSetup*/	,;	// 05
+				lTReport				,;	// 06
+				/*@oPrintSetup*/		,;	// 07
+				cPrinter				,;	// 08
+				lServer					,;	// 09
+				lPDFAsPNG				,;	// 10
+				lRaw					,;	// 11
+				lViewPDF				,;	// 12
+				nQtdCopies				,;	// 13
+				uParam1					,;	// 14
+				uParam2					,;	// 15
+				uParam3					,;	// 16
+				uParam4					,;	// 17
+				uParam5					)	// 18
+						//Inicializador padrao?
+	::_cFilePrinter	:= cFilePrinter
+
+	//Ajuste para mesmas coordenadas do objeto TMSPrinter------------------------------------------
+	If lAdjustToLegacy
+		::nAdjustFont 	:=  1
+		::nAdjustSay	:= 25
+	EndIf
+
+	//Ajusta as proporcoes para o FWMsPrinter------------------------------------------------------
+	::nTab1		:= 360
+	::nTab2		:= 180
+
+	//Margens da pagina
+	::nHM		:= 100
+	::nVM		:= 050
+
+	//+----------------------------------------------------------+
+	//| Precisa informar sempre em dois caracteres, para valores |
+	//| fracionados usar o sinal de menos (ex.: 0,5 => '-5')     |
+	//+----------------------------------------------------------+
+	//espesura da linha do box e line
+	::cEspLin	:= '-7'
+
+	::nMult		:= 1.25
+
+	::nResolution	:= 72
+
+	::nQtdCol	:= 4  //Quantidade de colunas de assinaturas para o formado retrato
+
+	::nEspAss	:= 20 //Espaco entre as assinaturas
+
+//	::SetParm("-RFS")   //Parametro orientado pela Totvs SP, nao usado porque distorceu a impressao em alguns tamanhos de fonte
+	
+	//Compatibiliza com pdf------------------------------------------------------------------------
+	If nDevice == IMP_PDF
+		::nHM	/=  3
+		::nVM	/=  3
+	EndIf
+
+	//Execusao via rotina Job
+	If 	::lInJob
+
+		//Seta diretorio para salvar PDF
+		::cPathPDF	:= ::_oStp:GetProperty(PD_VALUETYPE)
+	//Se em PDF no cliente -> forca a visualizacao
+	ElseIf ::_oStp:GetProperty(PD_PRINTTYPE  ) == IMP_PDF .And. ;
+		::_oStp:GetProperty(PD_DESTINATION) == AMB_CLIENT
+
+		::cPathPDF	:= ::_oStp:GetProperty(PD_VALUETYPE)
+		::SetViewPDF(::_oStp:GetProperty(PD_PREVIEW))
+	EndIf
+
+	//Orientacao do relatorio
+	If ::_oStp:GetProperty(PD_ORIENTATION) == nPD_RETRATO
+		::SetPortrait()
+	Else
+		::SetLandscape()
+	Endif
+
+	If ::_oStp:GetProperty(PD_MARGIN) <> NIL
+		::SetMargin(::_oStp:GetProperty(PD_MARGIN)[1],;
+					::_oStp:GetProperty(PD_MARGIN)[2],;
+					::_oStp:GetProperty(PD_MARGIN)[3],;
+					::_oStp:GetProperty(PD_MARGIN)[4] )
+	EndIf
+
+	If ::_oStp:GetProperty(PD_PAPERSIZE) <> NIL
+		::SetPaperSize( U_CXConvPSize(::_oStp:GetProperty(PD_PAPERSIZE),'T') )    //Seta tamanho da pagina, coordenadas de impressao e variaveis
+	EndIf
+
+    //::setCopies( Val( ::_oStp:cQtdCopia ) )	//Ja setou no New
+
+	//Verifica se ocorreu erro ao criar arquivo temporario-----------------------------------------
+	If 	::oFileWriter <> NIL .And. ;
+		(	::oFileWriter:HasError() .Or. ;
+	 		::oFileWriter:oErroLog:HasError() .Or. ;
+	 		::oFileWriter:nHandleN < 0 )
+
+		lBuffer		:= ::oFileWriter:lBuffer
+		::_cMsgErro	:= ::oFileWriter:oErroLog:Message
+		cMsg		:= ::_cMsgErro
+
+		For nX := 1 to 10	//Tenta 10 vezes criar um novo arquivo
+			cNewFile	:= '\system\'+GetNextAlias() //CriaTrab(NIL, .F.) //Cria arquivo temporario, ou retorna um Alias temporario com .F.
+			If .Not. File(cNewFile)
+
+				::oFileWriter:Close()	//Fecha o arquivo atual
+
+				//Destroi o objeto
+				FreeObj(::oFileWriter)
+				::oFileWriter := Nil
+
+				::oFileWriter	:= FWFileWriter():New(cNewFile,lBuffer)
+
+				If .Not. ::oFileWriter:HasError()
+					Exit
+				EndIf
+			Else
+				U_CXConOut(U_CXTxtMsg(self)+'Arquivo temporário '+cNewFile+' já existe. Tentando o próximo.')
+			EndIf
+		Next
+	EndIf
+
+	//Verifica se mesmo depois de tentar 10 vezes ainda esta com problema--------------------------
+	If 	::oFileWriter <> NIL .And. ;
+		(	::oFileWriter:HasError() .Or. ;
+			::oFileWriter:oErroLog:HasError() .Or. ;
+			::oFileWriter:nHandleN <= 0 )
+
+		U_CXMsgErro('Problema ao criar o arquivo temporário para impressão.'+CRLF+;
+					::_cMsgErro,;
+					'INFORME O SETOR DE T.I.',.Not. ::_lConsole,/*oArea*/,,self)
+
+		lErro		:= .T.	//Variavel de controle de erros
+		::_lErro	:= .T.
+	EndIf
+
+	::bCabec	:= {|nLin,oRpt| ::CXCabec()  }
+	::bRodape	:= {|nLin,aAss| ::CXRodape(aAss) }
+	::bFimLinha	:= {|nLin| ( nLin > ::nFV )}
+	::bQuebraPg	:= {|nLin,lImpRodape,nEspaco,lForca| ::CXQuebraPag(nLin,lImpRodape,nEspaco,lForca) }
+
+	//+------------------------+
+	//| Impressao do cabecalho |
+	//+------------------------+
+	::cTitulo	:= ""
+
+	If 	::_oStp <> NIL .And. ;
+		GetClassName(::_oStp) == 'CXPRINTSETUP'
+		//aScan(ClassDataArr(::_oStp,.F.),{|x| x[1] == '_CTITULO'} ) > 0
+
+		::cTitulo	:= ::_oStp:_cTitulo
+	EndIf
+
+	#IFDEF TOTVS_FIRST
+		::cNomeEmp	:= FWSuperGetMV('MS_NOMEMP',.F.,FWFilManut(cFilAnt)[3][1][1])
+	#ELSE
+		::cNomeEmp	:= FWSM0Util():getSM0FullName() //FWSuperGetMV('MS_NOMEMP',.F.,SM0->M0_NOMECOM)
+	#ENDIF
+
+	::cLogo   	:= U_CXLogo() //cPath + "DANFE" + cEmpAnt + cFilAnt + ".BMP"
+
+Return Self
+
+//#############################################################################
+//##+==========+===============+=======+===============+======+=============+##
+//##|Programa  | SayBitmap     | Autor | Cirilo Rocha  | Data | 03/02/2023  |##
+//##+==========+===============+=======+===============+======+=============+##
+//##|Descr.    | Substitui o método padrao para permitir não imprimir caso  |##
+//##|          |  a propriedade _lSemBmp esteja ativada                     |##
+//##+==========+===========+================================================+##
+//##|   DATA   |Programador| Manutenção Efetuada                            |##
+//##+==========+===========+================================================+##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##+==========+===========+================================================+##
+//#############################################################################
+Method SayBitmap(	nRow		,;	// 01 nRow
+					nCol		,;	// 02 nCol
+					cBitmap		,;	// 03 cBitmap
+					nWidth		,;	// 04 nWidth
+					nHeight		,;	// 05 nHeight	
+					uParam1		,;	// 06 uParam1
+					uParam2		,;	// 07 uParam2	
+					uParam3		,;	// 08 uParam3	
+					uParam4		,;	// 09 uParam4	
+					uParam5		);	// 10 uParam5	
+							Class CXMSPrinter
+
+	//Declaracao de variaveis----------------------------------------------------------------------
+	Local uRet			AS Variant 	//AS Character,Numeric,Date,Array,Logical,Object,Block
+
+	//Parametros da rotina-------------------------------------------------------------------------
+	ParamType 0	VAR nRow	  	AS Numeric
+	ParamType 1	VAR nCol	  	AS Numeric
+	ParamType 2	VAR cBitmap	  	AS Character
+	ParamType 3	VAR nWidth		AS Numeric		Optional Default NIL
+	ParamType 4	VAR nHeight		AS Numeric		Optional Default NIL
+
+	//---------------------------------------------------------------------------------------------
+
+	//Pula quando existe erro
+	If 	.Not. ::_lErro .And. ;
+		.Not. ::_lSemBmp
+
+		//Chama construtor da classe pai (FWMSPrinter)
+		uRet	:=	_Super:SayBitmap(	nRow	,;
+										nCol	,;
+										cBitmap	,;
+										nWidth	,;
+										nHeight	,;
+										uParam1	,;
+										uParam2	,;
+										uParam3	,;
+										uParam4	,;
+										uParam5	)						
+	EndIf
+
+Return uRet
+
+//#############################################################################
+//##+==========+===============+=======+===============+======+=============+##
+//##|Programa  | SetPaperSize  | Autor | Cirilo Rocha  | Data |   /  /      |##
+//##+==========+===============+=======+===============+======+=============+##
+//##|Descr.    | Substitui o método padrao para alterar o tamanho da página |##
+//##|          | e reconfigurar as propriedades customizadas                |##
+//##+==========+===========+================================================+##
+//##|   DATA   |Programador| Manutenção Efetuada                            |##
+//##+==========+===========+================================================+##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##+==========+===========+================================================+##
+//#############################################################################
+Method SetPaperSize(nPaperSize	,;	// 01
+					nHeight		,;	// 02
+					nLarg 		,;	// 03
+					uParam1		,;	// 04
+					uParam2		,;	// 05
+					uParam3		,;	// 06
+					uParam4		,;	// 07
+					uParam5		);	// 08
+							Class CXMSPrinter
+
+	//Declaracao de variaveis----------------------------------------------------------------------
+	Local uRet			AS Variant 	//AS Character,Numeric,Date,Array,Logical,Object,Block
+
+	//Parametros da rotina-------------------------------------------------------------------------
+	ParamType 0	VAR nPaperSize  	AS Numeric
+	ParamType 1	VAR nHeight  		AS Numeric	Optional Default NIL
+	ParamType 2	VAR nLarg	  		AS Numeric	Optional Default NIL
+
+	//---------------------------------------------------------------------------------------------
+
+	//Pula quando existe erro
+	If .Not. ::_lErro
+		//Chama construtor da classe pai (FWMSPrinter)
+		uRet	:=	_Super:SetPaperSize(nPaperSize	,;	// 01
+				  						nHeight		,;	// 02
+										nLarg 		,;	// 03
+										uParam1		,;	// 04
+										uParam2		,;	// 05
+										uParam3		,;	// 06
+										uParam4		,;	// 07
+										uParam5		) 	// 08
+	EndIf
+
+	::lAjtPDF	:= FWSuperGetMV('MX_AJTPDF',.F.,.T.) //Ajusta erro impressao PDF no servidor
+
+	//Precisa estar antes da funcao ConvH
+	::nMS	:= 0
+	If (::nDevice == IMP_PDF) .And. ;
+		::lAjtPDF
+
+		::nMS			:= 20 			//Ajuste da margem superior
+		::nFactorHor	:= (2400/620) 	//Bug na impressao em pdf via Job
+	EndIf
+
+	::nHP		:= ::ConvH(::nHorzRes()) //tamanho horizontal do relatorio
+	::nVP		:= ::ConvV(::nVertRes()) //tamanho horizontal do relatorio
+
+	::_nAdjust_Say 	:= ::ConvV(nAdjust_Say) //Ajuste da impressao do say (padrao totvs)
+	
+	::nTab1		:= ::ConvH(::nTab1)
+	::nTab2		:= ::ConvH(::nTab2)
+
+	//Margens da pagina
+	::nHM		:= ::ConvH(::nHM)
+	::nVM		:= ::ConvV(::nVM)
+
+	//Seta informacoes da area de impressao
+	::CXAreaImp()
+
+Return uRet
+
+//#############################################################################
+//##+==========+===============+=======+===============+======+=============+##
+//##|Programa  | CXLine        | Autor | Cirilo Rocha  | Data |   /  /      |##
+//##+==========+===============+=======+===============+======+=============+##
+//##|Descr.    | Substitui o método padrão para deixar a espessura da linha |##
+//##|          | padrão customizada                                         |##
+//##+==========+===========+================================================+##
+//##|   DATA   |Programador| Manutenção Efetuada                            |##
+//##+==========+===========+================================================+##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##+==========+===========+================================================+##
+//#############################################################################
+Method CXLine( 	nTop		,;	// 01
+				nLeft		,;	// 02
+				nBottom		,;	// 03
+				nRight		,;	// 04
+				nColor 		,;	// 05
+				cPixel		,;	// 06
+				nLineType 	);	// 07
+						Class CXMSPrinter
+
+	//Declaracao de variaveis----------------------------------------------------------------------
+	Local cStr	AS Character
+
+	//Pula quando existe erro
+	If ::_lErro
+		Return NIL
+	EndIf
+
+	//Parametros da rotina-------------------------------------------------------------------------
+	ParamType 0	VAR nTop  		AS Numeric
+	ParamType 1	VAR nLeft  		AS Numeric
+	ParamType 2	VAR nBottom  	AS Numeric
+	ParamType 3	VAR nRight 		AS Numeric
+	ParamType 4	VAR nColor	  	AS Numeric		Optional DEFAULT CLR_BLACK
+	ParamType 5	VAR cPixel 		AS Character 	Optional DEFAULT ::cEspLin
+	ParamType 6	VAR nLineType	AS Numeric	 	Optional DEFAULT LN_SOLID //Linha solida
+
+	//--------------------------------------------------------------------------------------------
+	
+	//Remapeia coordenadas
+	::CXAjPos4(@nTop,@nLeft,@nBottom,@nRight,@Self)
+
+	cStr	:= 	"0009"						+;
+	        	::Convert(nLeft		, "H" )	+;
+	        	::Convert(nTop   	, "V" )	+;
+		        ::Convert(nRight	, "H" )	+;
+		        ::Convert(nBottom	, "V" )	+;
+	    	    FWColor2Hex( nColor )		+;
+	        	StrZero( nLineType, 1 )		+;
+	         	cPixel
+
+//	If ::_lFWrite
+// 		FWrite( ::nHandle, cStr )
+// 	Else
+	 	::oFileWriter:Write( cStr )
+//	EndIf
+
+	::_lAjPos	:= .F.
+
+Return
+
+//#############################################################################
+//##+==========+===============+=======+===============+======+=============+##
+//##|Programa  | Line          | Autor | Cirilo Rocha  | Data |   /  /      |##
+//##+==========+===============+=======+===============+======+=============+##
+//##|Descr.    | Sobreposto o método padrão para que a linha possa ser im-  |##
+//##|          | presssa usando o mesmo método das outras linhas respeitando|##
+//##|          | a espessura informada (cPixel)                             |##
+//##+==========+===========+================================================+##
+//##|   DATA   |Programador| Manutenção Efetuada                            |##
+//##+==========+===========+================================================+##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##+==========+===========+================================================+##
+//#############################################################################
+Method Line(nTop	,;	// 01
+			nLeft	,;	// 02
+			nBottom	,;	// 03
+			nRight	,;	// 04
+			nColor 	,;	// 05
+			cPixel	,;	// 06
+			uParam1	,;	// 07
+			uParam2	,;	// 08
+			uParam3	,;	// 09
+			uParam4	,;	// 10
+			uParam5	);	// 11
+				Class CXMSPrinter
+
+	//Declaracao de variaveis----------------------------------------------------------------------
+	Local uRet				AS Variant 	//AS Character,Numeric,Date,Array,Logical,Object,Block
+	Local nLineType			AS Integer
+
+	//Pula quando existe erro
+	If ::_lErro
+		Return NIL
+	EndIf
+
+	//Parametros da rotina-------------------------------------------------------------------------
+	ParamType 0	VAR nTop  		AS Numeric
+	ParamType 1	VAR nLeft  		AS Numeric
+	ParamType 2	VAR nBottom  	AS Numeric
+	ParamType 3	VAR nRight 		AS Numeric
+	ParamType 4	VAR nColor	  	AS Numeric		Optional DEFAULT CLR_BLACK
+	ParamType 5	VAR cPixel 		AS Character	Optional DEFAULT ::cEspLin
+
+	//Inicializa variaveis-------------------------------------------------------------------------
+	nLineType	:= 0  //Linha solida
+
+	//--------------------------------------------------------------------------------------------
+
+	//Remapeia coordenadas
+	::CXAjPos4(	@nTop	,;	//01
+				@nLeft	,;	//02
+				@nBottom,;	//03
+				@nRight	,;	//04
+				@Self	 )	//05
+
+// 	_Super:Line(nTop	,;	//01
+//				nLeft	,;	//02
+//				nBottom	,;	//03
+//				nRight	,;	//04
+//				nColor	,;	//05
+//				cPixel	 )	//06
+ 	uRet	:= ::CXLine(nTop	,;	//01
+						nLeft	,;	//02
+						nBottom	,;	//03
+						nRight	,;	//04
+						nColor	,;	//05
+						cPixel	,;	//06
+						nLineType)	//07
+
+	::_lAjPos	:= .F.
+
+Return uRet
+
+//#############################################################################
+//##+==========+===============+=======+===============+======+=============+##
+//##|Programa  | Box           | Autor | Cirilo Rocha  | Data |   /  /      |##
+//##+==========+===============+=======+===============+======+=============+##
+//##|Descr.    | Sobreposto o método padrão para que o box possa ser impres-|##
+//##|          | so sem preenchimento                                       |##
+//##+==========+===========+================================================+##
+//##|   DATA   |Programador| Manutenção Efetuada                            |##
+//##+==========+===========+================================================+##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##+==========+===========+================================================+##
+//#############################################################################
+Method Box(	nTop	,;	// 01
+			nLeft	,;	// 02
+			nBottom	,;	// 03
+			nRight	,;	// 04
+			cPixel	,;	// 05
+			uParam1	,;	// 06
+			uParam2	,;	// 07
+			uParam3	,;	// 08
+			uParam4	,;	// 09
+			uParam5	;	// 10
+					) Class CXMSPrinter
+	
+	//Declaracao de variaveis----------------------------------------------------------------------
+	Local uRet			AS Variant
+	
+	//Pula quando existe erro
+	If ::_lErro
+		Return NIL
+	EndIf
+	
+	//Parametros da rotina-------------------------------------------------------------------------
+	ParamType 0	VAR nTop  		AS Numeric
+	ParamType 1	VAR nLeft  		AS Numeric
+	ParamType 2	VAR nBottom  	AS Numeric
+	ParamType 3	VAR nRight 		AS Numeric
+	ParamType 4	VAR cPixel 		AS Character			Optional DEFAULT ::cEspLin
+
+	//Remapeia coordenadas
+	::CXAjPos4(	@nTop	,;	//01
+				@nLeft	,;	//02
+				@nBottom,;	//03
+				@nRight	,;	//04
+				@Self	 )	//05
+
+	If ::_lBoxLegacy
+		uRet := _Super:Box(	nTop	,;	//01
+							nLeft	,;	//02
+							nBottom	,;	//03
+							nRight	,;	//04
+							cPixel	,;	//05
+							uParam1	,;	//06
+							uParam2	,;	//07
+							uParam3	,;	//08
+							uParam4	,;	//09
+							uParam5	) 	//10 Box padrao
+	Else
+		uRet := ::CxBox(nTop			,;	//01
+						nLeft			,;	//02
+						nBottom			,;	//03
+						nRight			,;	//04
+						cPixel			,;	//05
+						/*nColor*/		,;	//06
+						/*nLineType*/	)	//07
+	EndIf
+
+	::_lAjPos	:= .F.
+
+Return uRet
+
+//#############################################################################
+//##+==========+===============+=======+===============+======+=============+##
+//##|Programa  | CxBox         | Autor | Cirilo Rocha  | Data |   /  /      |##
+//##+==========+===============+=======+===============+======+=============+##
+//##|Descr.    | Melhoria na função padrão adicionandas opções de cor e tipo|##
+//##|          | da linha a ser impressa no box                             |##
+//##+==========+===========+================================================+##
+//##|   DATA   |Programador| Manutenção Efetuada                            |##
+//##+==========+===========+================================================+##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##+==========+===========+================================================+##
+//#############################################################################
+Method CxBox(	nTop		,;	// 01
+				nLeft		,;	// 02
+				nBottom		,;	// 03
+				nRight		,;	// 04
+				cPixel		,;	// 05
+				nColor		,;	// 06
+				nLineType	;	// 07
+							) Class CXMSPrinter
+
+	//Pula quando existe erro
+	If ::_lErro
+		Return NIL
+	EndIf
+	
+	//Parametros da rotina-------------------------------------------------------------------------
+	ParamType 0	VAR nTop  		AS Numeric
+	ParamType 1	VAR nLeft  		AS Numeric
+	ParamType 2	VAR nBottom  	AS Numeric
+	ParamType 3	VAR nRight 		AS Numeric
+	ParamType 4	VAR cPixel 		AS Character	Optional DEFAULT ::cEspLin
+	ParamType 5	VAR nColor	  	AS Numeric		Optional DEFAULT CLR_BLACK
+	ParamType 6	VAR nLineType	AS Numeric		Optional DEFAULT LN_SOLID // Solid Line
+
+	//---------------------------------------------------------------------------------------------
+
+	//Remapeia coordenadas
+	::CXAjPos4(	@nTop	,;	//01
+				@nLeft	,;	//02
+				@nBottom,;	//03
+				@nRight	,;	//04
+				@Self	 )	//05
+	
+	//         01     02      03      04      05      06       07
+	::CXLine(nTop	,nLeft	,nTop	,nRight	,nColor	,cPixel , nLineType )
+	::CXLine(nBottom,nLeft	,nBottom,nRight	,nColor	,cPixel , nLineType )
+	::CXLine(nTop	,nLeft	,nBottom,nLeft	,nColor	,cPixel , nLineType )
+	::CXLine(nTop	,nRight	,nBottom,nRight	,nColor	,cPixel , nLineType )
+
+	::_lAjPos	:= .F.
+
+Return
+
+//#############################################################################
+//##+==========+===============+=======+===============+======+=============+##
+//##|Programa  | Code128C      | Autor | Cirilo Rocha  | Data | 15/08/2019  |##
+//##+==========+===============+=======+===============+======+=============+##
+//##|Descr.    | Melhoria no método padrão para utilizar as rotinas de rema-|##
+//##|          | peamento das coordenadas do CXMsPrinter                    |##
+//##+==========+===========+================================================+##
+//##|   DATA   |Programador| Manutenção Efetuada                            |##
+//##+==========+===========+================================================+##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##+==========+===========+================================================+##
+//#############################################################################
+Method Code128C(nTop	,;	// 01
+				nLeft	,;	// 02
+				cCodeBar,;	// 03
+				nSizeBar,;	// 04
+				uPar5	,;	// 05
+				uPar6	,;	// 06
+				uPar7	,;	// 07
+				uPar8	;	// 08
+						) Class CXMSPrinter
+	
+	//Declaracao de variaveis----------------------------------------------------------------------
+	Local uRet			AS Variant
+	
+	//Pula quando existe erro
+	If ::_lErro
+		Return NIL
+	EndIf
+	
+	//Parametros da rotina-------------------------------------------------------------------------
+	ParamType 0	VAR nTop  		AS Numeric
+	ParamType 1	VAR nLeft  		AS Numeric
+	ParamType 2	VAR cCodeBar	AS Character
+	ParamType 3	VAR nSizeBar  	AS Numeric
+
+	//---------------------------------------------------------------------------------------------
+
+	//Remapeia coordenadas
+	::CXAjPos2(	@nTop	,;	//01
+				@nLeft	,;	//02
+				@Self	 )	//03
+
+	uRet	:= _Super:Code128C(	nTop		,;	// 01
+								nLeft		,;	// 02
+								cCodeBar	,;	// 03
+								nSizeBar	,;	// 04
+								uPar5		,;	// 05
+								uPar6		,;	// 06
+								uPar7		,;	// 07
+								uPar8		)	// 08
+	
+	::_lAjPos	:= .F.
+	
+Return uRet
+
+//#############################################################################
+//##+==========+===============+=======+===============+======+=============+##
+//##|Programa  | QRCode        | Autor | Cirilo Rocha  | Data | 15/08/2019  |##
+//##+==========+===============+=======+===============+======+=============+##
+//##|Descr.    | Melhoria no método padrão para utilizar as rotinas de rema-|##
+//##|          | peamento das coordenadas do CXMsPrinter                    |##
+//##+==========+===========+================================================+##
+//##|   DATA   |Programador| Manutenção Efetuada                            |##
+//##+==========+===========+================================================+##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##+==========+===========+================================================+##
+//#############################################################################
+Method QRCode(	nTop	,;	// 01
+				nLeft	,;	// 02
+				cCodeBar,;	// 03
+				nSizeBar,;	// 04
+				uPar5	,;	// 05
+				uPar6	,;	// 06
+				uPar7	,;	// 07
+				uPar8	;	// 08
+						) Class CXMSPrinter
+	
+	//Declaracao de variaveis----------------------------------------------------------------------
+	Local uRet			AS Variant
+	
+	//Pula quando existe erro
+	If ::_lErro
+		Return NIL
+	EndIf
+	
+	//Parametros da rotina-------------------------------------------------------------------------
+	ParamType 0	VAR nTop  		AS Numeric
+	ParamType 1	VAR nLeft  		AS Numeric
+	ParamType 2	VAR cCodeBar	AS Character
+	ParamType 3	VAR nSizeBar  	AS Numeric
+
+	//---------------------------------------------------------------------------------------------
+
+	//Remapeia coordenadas
+	::CXAjPos4(@nTop,@nLeft,0,@nSizeBar,@Self)
+
+	uRet	:= _Super:QRCode(	nTop		,;	// 01
+								nLeft		,;	// 02
+								cCodeBar	,;	// 03
+								nSizeBar	,;	// 04
+								uPar5		,;	// 05
+								uPar6		,;	// 06
+								uPar7		,;	// 07
+								uPar8		)	// 08
+	
+	::_lAjPos	:= .F.
+	
+Return uRet 
+
+//#############################################################################
+//##+==========+===============+=======+===============+======+=============+##
+//##|Programa  | Setup         | Autor | Cirilo Rocha  | Data | 08/01/2023  |##
+//##+==========+===============+=======+===============+======+=============+##
+//##|Descr.    | Sobreposição do método padrão porque este estava deixando o|##
+//##|          |  sistema travado                                           |##
+//##+==========+===========+================================================+##
+//##|   DATA   |Programador| Manutenção Efetuada                            |##
+//##+==========+===========+================================================+##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##+==========+===========+================================================+##
+//#############################################################################
+Method Setup() Class CXMSPrinter
+	
+	If ::_oStp == NIL
+		//+----------------------------------------------------------------------+
+		//| Inicializacao do objeto Setup Print com as propriedades de impressao |
+		//+----------------------------------------------------------------------+
+		::_oStp	:= CXPrintSetup():New(	/*nFlags*/			,;	//01
+										::_cFilePrinter		 )	//02
+	EndIf
+
+	//Chama tela de setup
+	::nModalResult	:= ::_oStp:Activate()
+
+Return
+
+//#############################################################################
+//##+==========+===============+=======+===============+======+=============+##
+//##|Programa  | BoxFill       | Autor | Cirilo Rocha  | Data |   /  /      |##
+//##+==========+===============+=======+===============+======+=============+##
+//##|Descr.    | Método para impressão de box com fundo branco (como no     |##
+//##|          | padrão)                                                    |##
+//##+==========+===========+================================================+##
+//##|   DATA   |Programador| Manutenção Efetuada                            |##
+//##+==========+===========+================================================+##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##+==========+===========+================================================+##
+//#############################################################################
+Method BoxFill(	nTop	,;	// 01
+				nLeft	,;	// 02
+				nBottom	,;	// 03
+				nRight	,;	// 04
+				cPixel	,;	// 05
+				uParam1	,;	// 06
+				uParam2	,;	// 07
+				uParam3	,;	// 08
+				uParam4	,;	// 09
+				uParam5	;	// 10
+						) Class CXMSPrinter
+
+	//Declaracao de variaveis----------------------------------------------------------------------
+	Local uRet			AS Variant
+
+	//Pula quando existe erro
+	If ::_lErro
+		Return NIL
+	EndIf
+
+	//Parametros da rotina-------------------------------------------------------------------------
+	ParamType 0	VAR nTop  		AS Numeric
+	ParamType 1	VAR nLeft  		AS Numeric
+	ParamType 2	VAR nBottom  	AS Numeric
+	ParamType 3	VAR nRight 		AS Numeric
+	ParamType 4	VAR cPixel 		AS Character		 	Optional DEFAULT ::cEspLin
+
+	//---------------------------------------------------------------------------------------------
+
+	//Remapeia coordenadas
+	::CXAjPos4(	@nTop	,;	//01
+				@nLeft	,;	//02
+				@nBottom,;	//03
+				@nRight	,;	//04
+				@Self	 )	//05
+	
+	//Box padrao
+	uRet	:= _Super:Box(	nTop	,;	// 01
+							nLeft	,;	// 02
+							nBottom	,;	// 03
+							nRight	,;	// 04
+							cPixel	,;	// 05
+							uParam1	,;	// 06
+							uParam2	,;	// 07
+							uParam3	,;	// 08
+							uParam4	,;	// 09
+							uParam5	) 	// 10
+	
+	::_lAjPos	:= .F.
+	
+Return uRet
+
+//#############################################################################
+//##+==========+===============+=======+===============+======+=============+##
+//##|Programa  | Say           | Autor | Cirilo Rocha  | Data | 29/09/2016  |##
+//##+==========+===============+=======+===============+======+=============+##
+//##|Descr.    | Método para impressão de textos alinhados a esquerda       |##
+//##|          |                                                            |##
+//##|          | Customizado para remover caracteres vazios a direita e para|##
+//##|          | não imprimir strings vazias.                               |##
+//##+==========+===========+================================================+##
+//##|   DATA   |Programador| Manutenção Efetuada                            |##
+//##+==========+===========+================================================+##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##+==========+===========+================================================+##
+//#############################################################################
+Method Say(	nPLin	,;	// 01
+			nPCol	,;	// 02
+			cTexto	,;	// 03
+			oFonte	,;	// 04
+			nLargura,;	// 05
+			nClrText,;	// 06
+			nAngle  ,;	// 07
+			uParam1	,;	// 08
+			uParam2	,;	// 09
+			uParam3	,;	// 10
+			uParam4	,;	// 11
+			uParam5	;	// 12
+					) Class CXMSPrinter
+
+	//Declaracao de variaveis----------------------------------------------------------------------
+	Local uRet				AS Variant 	//AS Character,Numeric,Date,Array,Logical,Object,Block
+	Local nAlignVert		AS Numeric
+	Local nAlignHorz		AS Numeric
+	Local nAltura			AS Numeric
+	Local nLin				AS Numeric
+	Local nCol				AS Numeric
+
+	//Pula quando existe erro
+	If ::_lErro
+		Return NIL
+	EndIf
+
+	//Otimizacao
+	If Empty(cTexto)
+		Return uRet
+	EndIf
+
+	//Parametros da rotina-------------------------------------------------------------------------
+	ParamType 0	VAR nPLin  		AS Numeric
+	ParamType 1	VAR nPCol  		AS Numeric
+	ParamType 2	VAR cTexto  	AS Character
+	ParamType 3	VAR oFonte 		AS Object Class tFont,tFontEx	Optional Default ::oFontAtu
+	ParamType 4	VAR nLargura	AS Numeric						Optional Default ::nHP+300  //Nao calcula muito bem o espaco disponivel
+	ParamType 5	VAR nClrText 	AS Numeric						Optional Default NIL
+	ParamType 6	VAR nAngle 		AS Numeric						Optional Default NIL
+
+	//Inicializa variaveis-------------------------------------------------------------------------
+	nAlignVert	:= nALV_SUPERIOR
+	nAlignHorz	:= nALH_ESQUERDA
+
+	//Remapeia coordenadas
+	::CXAjPos2(	@nPLin	,;	//01
+				@nPCol	,;	//02
+				@Self	 )	//03
+
+	nLin		:= ::CXAjustaLin(	nPLin	,;	//01
+									@oFonte	,;	//02
+									@Self	 )	//03
+	nCol		:= nPCol
+	nAltura		:= 100 					//Precisa ter uma dimensao para nao causar erros na montagem
+	cTexto		:= U_CXRTrim(cTexto) 	//Remove caracteres vazio do final da string
+
+	//---------------------------------------------------------------------------------------------
+
+//	If .Not. Empty(cTexto)
+		uRet	:= ::SayAlign(	nLin		,;	//01
+								nCol		,;	//02
+								cTexto		,;	//03
+								@oFonte		,;	//04
+								nLargura	,;	//05
+								nAltura		,;	//06
+								nClrText	,;	//07
+								nAlignHorz	,;	//08
+								nAlignVert	 )	//09
+
+//		uRet	:= _Super:Say(	nLin		,;	//01
+//								nCol		,;	//02
+//								cTexto		,;	//03
+//								@oFonte		,;	//04
+//								nLargura	,;	//05
+//								nAngle		,;	//06
+//								uParam1		,;	//07
+//								uParam2		,;	//08
+//								uParam3		,;	//09
+//								uParam4		,;	//10
+//								uParam5		 )	//11
+//	EndIf
+
+	::_lAjPos	:= .F.
+
+Return uRet
+
+//#############################################################################
+//##+==========+===============+=======+===============+======+=============+##
+//##|Programa  | SayR          | Autor | Cirilo Rocha  | Data |   /  /      |##
+//##+==========+===============+=======+===============+======+=============+##
+//##|Descr.    | Método para impressão de textos alinhados a direita        |##
+//##+==========+===========+================================================+##
+//##|   DATA   |Programador| Manutenção Efetuada                            |##
+//##+==========+===========+================================================+##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##+==========+===========+================================================+##
+//#############################################################################
+Method SayR(nPLin	,;	// 01
+			nPCol	,;	// 02
+			cTexto	,;	// 03
+			oFonte	,;	// 04
+			nClrText;	// 05
+					) Class CXMSPrinter
+	
+	//Declaracao de variaveis----------------------------------------------------------------------
+	Local uRet			AS Variant
+	Local nAlignVert	AS Numeric
+	Local nAlignHorz	AS Numeric
+	Local nLin			AS Numeric
+	Local nCol			AS Numeric
+	Local nLarg			AS Numeric
+	Local nAltura		AS Numeric
+
+	//Otimizacao
+	If Empty(cTexto)
+		Return
+	EndIf
+
+	//Pula quando existe erro
+	If ::_lErro
+		Return NIL
+	EndIf
+
+	//Parametros da rotina-------------------------------------------------------------------------
+	ParamType 0	VAR nPLin  		AS Numeric
+	ParamType 1	VAR nPCol  		AS Numeric
+	ParamType 2	VAR cTexto  	AS Character
+	ParamType 3	VAR oFonte 		AS Object Class tFont,tFontEx
+
+	//Inicializa variaveis-------------------------------------------------------------------------
+	nAlignVert	:= nALV_SUPERIOR
+	nAlignHorz	:= nALH_DIREITA
+
+	//Remapeia coordenadas
+	::CXAjPos2(	@nPLin	,;	//01
+				@nPCol	,;	//02
+				@Self	 )	//03
+
+//	U_CXSayR(nPLin,nPCol,cTexto,oFonte,Self)  			//Desativado porque ja existe o metodo abaixo que funciona melhor
+	nLin		:= ::CXAjustaLin(nPLin,@oFonte,@Self) 	//nPLin - ( ::CXTamLin(@oFonte,0.65)+2 )
+	nCol		:= 0
+	nLarg		:= nPCol
+	nAltura		:= 100 		//Precisa ter uma dimensao para nao causar erros na montagem
+
+	//---------------------------------------------------------------------------------------------
+	uRet	:= ::SayAlign(	nLin		,;	// 01
+							nCol		,;	// 02
+							cTexto		,;	// 03
+							@oFonte		,;	// 04
+							nLarg		,;	// 05
+							nAltura		,;	// 06
+							nClrText	,;	// 07
+							nAlignHorz	,;	// 08
+							nAlignVert	)	// 09
+	
+	::_lAjPos	:= .F.
+
+Return uRet
+
+//#############################################################################
+//##+==========+===============+=======+===============+======+=============+##
+//##|Programa  | SayC          | Autor | Cirilo Rocha  | Data |   /  /      |##
+//##+==========+===============+=======+===============+======+=============+##
+//##|Descr.    | Método para impressão de textos centralizados              |##
+//##+==========+===========+================================================+##
+//##|   DATA   |Programador| Manutenção Efetuada                            |##
+//##+==========+===========+================================================+##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##+==========+===========+================================================+##
+//#############################################################################
+Method SayC (	nPLin	,;	// 01
+				nPCol	,;	// 02
+				cTexto	,;	// 03
+				oFonte	,;	// 04
+				nLargura,;	// 05
+				nClrText;	// 06
+						) Class CXMSPrinter
+	
+	//Declaracao de variaveis----------------------------------------------------------------------
+	Local uRet			AS Variant
+	Local nAlignVert	AS Numeric
+	Local nAlignHorz	AS Numeric
+	Local nLin			AS Numeric
+	Local nCol			AS Numeric
+	Local nAltura		AS Numeric
+
+	//Otimizacao
+	If Empty(cTexto)
+		Return
+	EndIf
+
+	//Pula quando existe erro
+	If ::_lErro
+		Return NIL
+	EndIf
+
+	//Parametros da rotina-------------------------------------------------------------------------
+	ParamType 0	VAR nPLin  		AS Numeric
+	ParamType 1	VAR nPCol  		AS Numeric
+	ParamType 2	VAR cTexto  	AS Character
+	ParamType 3	VAR oFonte 		AS Object Class tFont,tFontEx
+	ParamType 4	VAR nLargura	AS Numeric
+
+	//Inicializa Variaveis-------------------------------------------------------------------------
+	nAlignVert	:= nALV_SUPERIOR
+	nAlignHorz	:= nALH_CENTRAL
+
+	//Remapeia coordenadas
+	::CXAjPos2(	@nPLin	,;	//01
+				@nPCol	,;	//02
+				@Self	 )	//03
+
+	nLin	:= ::CXAjustaLin(nPLin,@oFonte,@Self)				//nPLin - ( ::CXTamLin(@oFonte,0.65)+2 )
+	nCol	:= nPCol
+	nAltura	:= 100 //Precisa ter uma dimensao para nao causar erros na montagem
+
+	//---------------------------------------------------------------------------------------------
+
+//	U_CXSayC(	nPLin			,;	//01
+//				nPCol			,;	//02
+//				nPCol+nLargura	,;	//03
+//				cTexto			,;	//04
+//				oFonte			,;	//05
+//				Self			 )	//06	//Desativado porque ja existe o metodo abaixo que funciona melhor
+
+	uRet	:= ::SayAlign (	nLin		,;	// 01
+							nCol		,;	// 02
+							cTexto		,;	// 03
+							@oFonte		,;	// 04
+							nLargura	,;	// 05
+							nAltura		,;	// 06
+							nClrText	,;	// 07
+							nAlignHorz	,;	// 08
+							nAlignVert	)	// 09
+	
+	::_lAjPos	:= .F.
+
+Return uRet
+
+//#############################################################################
+//##+==========+===============+=======+===============+======+=============+##
+//##|Programa  | SayJ          | Autor | Cirilo Rocha  | Data |   /  /      |##
+//##+==========+===============+=======+===============+======+=============+##
+//##|Descr.    | Método para impressão de textos justicados                 |##
+//##+==========+===========+================================================+##
+//##|   DATA   |Programador| Manutenção Efetuada                            |##
+//##+==========+===========+================================================+##
+//##| 23/04/18 | Cirilo R. | Melhoria no tratamento para quebra de página   |##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##+==========+===========+================================================+##
+//#############################################################################
+Method SayJ ( 	nPLin	,;	// 01
+				nPCol	,;	// 02
+				cTexto	,;	// 03
+				oFonte	,;	// 04
+				nLargura,;	// 05
+				nTamLin	,;	// 06
+				nPosFim ;	// 07
+						) Class CXMSPrinter
+
+	//Declaracao de variaveis----------------------------------------------------------------------
+	Local aTexto	AS Array
+	Local nLin		AS Numeric
+	Local nFimPag	AS Numeric
+	Local nX		AS Integer
+//	Local nTamChar	AS Numeric
+//	Local cChar		AS Character
+//	Local nPosH		AS Numeric
+
+	//Otimizacao
+	If Empty(cTexto)
+		Return nPLin
+	EndIf
+	
+	//Pula quando existe erro
+	If ::_lErro
+		Return 1
+	EndIf
+
+	//Parametros da rotina-------------------------------------------------------------------------
+	ParamType 0	VAR nPLin  		AS Numeric
+	ParamType 1	VAR nPCol  		AS Numeric
+	ParamType 2	VAR cTexto  	AS Character
+	ParamType 3	VAR oFonte 		AS Object Class tFont,tFontEx
+	ParamType 4	VAR nLargura	AS Numeric
+	ParamType 5	VAR nTamLin		AS Numeric 		Optional DEFAULT ::CXTamLin(@oFonte) //Tamanho entre linhas
+	ParamType 6	VAR nPosFim		AS Numeric	 	Optional DEFAULT NIL //::nVP //Sem final pula pagina automaticamente
+
+	//Inicializa variaveis-------------------------------------------------------------------------
+	aTexto	:= U_CXMemoLine(cTexto	,;	//01
+							Self	,;	//02
+							@oFonte	,;	//03
+							nLargura )	//04
+
+	//Remapeia coordenadas
+	::CXAjPos2(	@nPLin	,;	//01
+				@nPCol	,;	//02
+				@Self	 )	//03
+
+	nLin	:= nPLin
+	nFimPag	:= ::nVP //tamanho horizontal
+
+	//---------------------------------------------------------------------------------------------
+
+	For nX := 1 to len(aTexto)
+
+		//+-------------------------------------------------+
+		//| Se ultrapassou o final do espaco para impressao |
+		//+-------------------------------------------------+
+		If 	nPosFim <> NIL
+			If nLin + nTamLin > nPosFim //.Or. ; 	//Final do espaco passado pelo usuario
+				//nLin + nTamLin > nFimPag			//Final da pagina
+
+				Exit
+			EndIf
+		Else
+			//Quebra pagina?
+			nLin	:= Eval(::bQuebraPg,nLin)
+		EndIf
+
+		::Say(	nLin		,;	//01
+				nPCol 		,;	//02
+				aTexto[nX] 	,;	//03
+				@oFonte 	 )	//04
+
+/*		//Tentei ajustar usando o tamanho retornado pela funcao, mas as letras ficam espacadas demais
+		nPosH	:= nPCol
+		For nY := 1 to len(aTexto[nX])
+			cChar		:= SubStr(aTexto[nX],nY,1)
+			nTamChar	:= U_FWTamFon( cChar , @oFonte )
+			::Say (nLin, nPosH, cChar , @oFonte)
+			nPosH		+= nTamChar
+		Next
+*/
+		nLin  += nTamLin
+	Next
+
+	::_lAjPos	:= .F.
+
+Return nLin
+
+//#############################################################################
+//##+==========+===============+=======+===============+======+=============+##
+//##|Programa  | CXTamLin      | Autor | Cirilo Rocha  | Data |   /  /      |##
+//##+==========+===============+=======+===============+======+=============+##
+//##|Descr.    | Método para calcular a altura da linha a ser impressa      |##
+//##+==========+===========+================================================+##
+//##|   DATA   |Programador| Manutenção Efetuada                            |##
+//##+==========+===========+================================================+##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##+==========+===========+================================================+##
+//#############################################################################
+Method CXTamLin(oFonte	,;	// 01
+				nMult	;	// 02
+						) Class CXMSPrinter
+
+	//Declaracao de variaveis----------------------------------------------------------------------
+	Local nIncLin	AS Numeric
+
+	//Pula quando existe erro
+	If ::_lErro
+		Return 1
+	EndIf
+	
+	//Parametros da rotina-------------------------------------------------------------------------
+	ParamType 0	VAR oFonte 		AS Object Class tFont,tFontEx
+	ParamType 1	VAR nMult		AS Numeric 				Optional DEFAULT ::nMult
+
+	//---------------------------------------------------------------------------------------------
+
+	//Seta a altura entre linhas
+	nIncLin	:= ::GetTextHeight("qMÃp",@oFonte) * nMult
+
+	//Ajuste de resolucao
+	nIncLin	:= ::ConvV(nIncLin)
+
+Return nIncLin
+
+//#############################################################################
+//##+==========+===============+=======+===============+======+=============+##
+//##|Programa  | CXBoxItens    | Autor | Cirilo Rocha  | Data |   /  /      |##
+//##+==========+===============+=======+===============+======+=============+##
+//##|Descr.    | Método para impressão de box itens (produtos p/ exemplo)   |##
+//##|          | dinamicamente                                              |##
+//##+==========+===========+================================================+##
+//##|   DATA   |Programador| Manutenção Efetuada                            |##
+//##+==========+===========+================================================+##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##+==========+===========+================================================+##
+//#############################################################################
+
+//+-------------------------------------------------------------+
+//| Array para impressao do pedido de vendas.                   |
+//| Estrutura:                                                  |
+//|            [1] - Titulo do box [opcional]                   |
+//|            [2] - Array com cabecalho                        |
+//|                [2][1] - Primeira coluna                     |
+//|                   [2][1][1] - Titulo da coluna              |
+//|                   [2][1][2] - Tamanho da coluna			    |
+//|            [3] - Array com campos para impressao            |
+//|                   [3][1] - Primeira coluna                  |
+//|            [...]                                            |
+//+-------------------------------------------------------------+
+Method CXBoxItens(	aItens	,;	//01
+					nVM		,;	//02
+					nHM		,;	//03
+					nLin	,;	//04
+					oFntCab	,;	//05
+					oFntItem,;	//06
+					nMult	;	//07
+							) Class CXMSPrinter
+
+	//Declaracao de variaveis----------------------------------------------------------------------
+	Local nMgBoxCab		AS Numeric
+	Local nMgBoxItm		AS Numeric
+	Local nIncLinCab	AS Numeric
+	Local nIncLinItm	AS Numeric
+	Local nX			AS Integer
+//	Local nTamCol		AS Numeric
+	Local nTamPto		AS Numeric
+	Local nColIni		AS Numeric
+	Local nColFim		AS Numeric
+	
+	//Pula quando existe erro
+	If ::_lErro
+		Return 1
+	EndIf
+
+	//Otimizacao
+	If Len(aItens) == 0
+		Return nLin
+	EndIf
+
+	//Parametros da rotina-------------------------------------------------------------------------
+	ParamType 0	VAR aItens  	AS Array
+	ParamType 1	VAR nVM			AS Numeric			Optional DEFAULT ::nVM //Tamanho entre linhas
+	ParamType 2	VAR nHM		  	AS Numeric			Optional DEFAULT ::nHM //Tamanho entre linhas
+	ParamType 3	VAR nLin	 	AS Numeric
+	ParamType 4	VAR oFntCab		AS Object Class tFont,tFontEx
+	ParamType 5	VAR oFntItem	AS Object Class tFont,tFontEx
+	ParamType 6	VAR nMult		AS Numeric 			Optional DEFAULT ::nMult
+
+	//---------------------------------------------------------------------------------------------
+	//Seta a altura entre linhas
+	nIncLinCab	:= ::CXTamLin(@oFntCab,nMult)
+	nMgBoxCab	:= nIncLinCab * 0.75
+
+	nIncLinItm	:= ::CXTamLin(@oFntItem,nMult)
+	nMgBoxItm	:= nIncLinItm * 0.75
+	nTamPto		:= U_CXTamTxt('.',@oFntItem,Self)
+
+	//+--------------------------+
+	//| Titulo do Box            |
+	//+--------------------------+
+	If ValType(aItens[nPR_TITULO]) <> 'C'
+		aSize(aItens,len(aItens)+1)
+		aIns(aItens,nPR_TITULO)
+		aItens[nPR_TITULO]	:= ''
+	EndIf
+
+	//+--------------------------------------------------------------+
+	//| Calcula largura total do box dos itens com base nas larguras |
+	//| das colunas                                                  |
+	//+--------------------------------------------------------------+
+	nColFim	:= nHM
+	For nX := 1 to len(aItens[nPR_DESCRI])
+		nColFim	+= aItens[nPR_DESCRI][nX][nPD_TAMANH]
+	Next
+
+	nColIni	:= nHM
+
+	//Quebra pagina?
+	nLin	:= Eval(::bQuebraPg,nLin)
+
+	If .Not. Empty(aItens[nPR_TITULO])
+		::SayC(	nLin+nMgBoxCab 						,;	//01
+				nHM+nMgBoxCab						,;	//02
+				aItens[nPR_TITULO]					,;	//03
+				@oFntCab							,;	//04
+				nColFim - nColIni - (2*nMgBoxCab) 	 )	//05
+				
+		::Box( 	nLin				,;	//01
+				nHM					,;	//02
+				nLin + nIncLinCab 	,;	//03
+				nColFim 			 )	//04
+		nLin	+= nIncLinCab
+	EndIf
+
+	//+--------------------------+
+	//| Conteudos dos itens      |
+	//+--------------------------+
+	For nX := 1 to len(aItens[nPR_CAMPOS])
+		nLin	:= ::CXLinTxt(	nLin 					,;	//01
+								nColIni 				,;	//02
+								aItens[nPR_CAMPOS][nX] 	,;	//03
+								aItens[nPR_DESCRI]		,;	//04
+								nIncLinItm 				,;	//05
+								nMgBoxItm  				,;	//06
+								@oFntItem 				,;	//07
+								( nX == 1 ) 			)	//08 - Forca impressao do cabecalho?
+	Next
+
+Return nLin
+
+//#############################################################################
+//##+==========+===============+=======+===============+======+=============+##
+//##|Programa  | CXBoxTxt      | Autor | Cirilo Rocha  | Data |   /  /      |##
+//##+==========+===============+=======+===============+======+=============+##
+//##|Descr.    | Método para impressão de box com colunas dinamicamente     |##
+//##+==========+===========+================================================+##
+//##|   DATA   |Programador| Manutenção Efetuada                            |##
+//##+==========+===========+================================================+##
+//##| 30/09/16 | Cirilo R. | Pequena correção nos alinhamentos dos box's    |##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##+==========+===========+================================================+##
+//#############################################################################
+//+-------------------------------------------------------------+
+//| Array para impressao do pedido de vendas.                   |
+//| Estrutura:                                                  |
+//|            [1] - Titulo do box                              |
+//|            [2] - Array com campos para impressao            |
+//|                   [2][1] - Primeira coluna                  |
+//|                         [2][1][1] - Titulo do campo         |
+//|                         [2][1][2] - Conteudo para impressao |
+//|                   [2][...] - outras colunas se houver       |
+//|            [...]                                            |
+//+-------------------------------------------------------------+
+Method CXBoxTxt(aImp	,;  //01 Array para impressao
+				nVM		,;  //02 Margem vertical
+				nHM		,;	//03 Margem horizontal
+				nLin	,;	//04 Linha inicial para impressao
+				oFntCab	,;	//05 Fonte para impressao do cabecalho
+				oFntItem,;	//06 Fonte para impressao dos itens
+				nTab	,;	//07 Espacamento para impressao do titulo da coluna
+				nMult	,;	//08 Multiplicador para espacamento entre linhas
+				lBoxCab	,;	//09 Imprime o box no cabecalho
+				lBoxItem,;	//10 Imprime o box nos itens?
+				nAjuste	;	//11 Ajuste da largura de impressao do sayJ, devido as funcoes padrao nao calcularem isso direito
+						) Class CXMSPrinter
+
+	//Declaracao de variaveis----------------------------------------------------------------------
+	Local nMgBoxCab		AS Numeric
+	Local nMgBoxItm		AS Numeric
+	Local nIncLinCab	AS Numeric
+	Local nIncLinItm	AS Numeric
+	Local nX,nY,nZ		AS Integer
+	Local nTamCol		AS Numeric
+	Local aItens		AS Array
+	Local nTamPto		AS Numeric
+	Local nQtdPto		AS Numeric
+//	Local nTamTxt		AS Numeric
+	Local nColIni		AS Numeric
+	Local nIncLinPro	AS Numeric
+	Local nLinFim		AS Numeric
+	Local nLinIni		AS Numeric
+	Local nEspTxt		AS Numeric
+	Local nTabDet		AS Numeric
+	Local oFntItemN		AS Object
+
+	//Pula quando existe erro
+	If ::_lErro
+		Return 1
+	EndIf
+	
+	//Otimizacao
+	If Len(aImp) == 0
+		Return nLin
+	EndIf
+
+	//Parametros da rotina-------------------------------------------------------------------------
+	ParamType 0		VAR aImp		AS Array
+	ParamType 1		VAR nVM			AS Numeric 		Optional DEFAULT ::nVM
+	ParamType 2		VAR nHM		  	AS Numeric		Optional DEFAULT ::nHM
+	ParamType 3		VAR nLin 		AS Numeric
+	ParamType 4		VAR oFntCab		AS Object Class tFont,tFontEx
+	ParamType 5		VAR oFntItem	AS Object Class tFont,tFontEx
+	ParamType 6		VAR nTab		AS Numeric		Optional DEFAULT 050
+	ParamType 7		VAR nMult		AS Numeric		Optional DEFAULT ::nMult
+	ParamType 8		VAR lBoxCab    	AS Logical 		Optional DEFAULT .T.
+	ParamType 9		VAR lBoxItem  	AS Logical 		Optional DEFAULT .T.
+	ParamType 10	VAR nAjuste		AS Numeric		Optional DEFAULT 0
+
+	//Inicializa Variaveis-------------------------------------------------------------------------
+	//Fonte negrito para os itens
+	oFntItemN		:= tFont():New(	oFntItem:Name		,;	//01
+									oFntItem:nWidth		,;	//02
+									oFntItem:nHeight	,;	//03
+									/*uPar3*/			,;	//04
+									.T.					,;	//05 - Negrito
+									/*uPar5*/			,;	//06
+									/*uPar6*/			,;	//07
+									/*uPar7*/			,;	//08
+									/*uPar8*/			,;	//09
+									oFntItem:Underline	,;	//10
+									oFntItem:Italic		)	//11
+
+	//Seta a altura entre linhas
+	nIncLinCab	:= ::CXTamLin(@oFntCab,nMult)
+	nMgBoxCab	:= nIncLinCab * 0.80
+
+	nIncLinItm	:= ::CXTamLin(@oFntItem,nMult)
+	nMgBoxItm	:= nIncLinItm * 0.80
+	nTamPto		:= U_CXTamTxt('.',@oFntItemN,Self)
+
+	//---------------------------------------------------------------------------------------------
+	For nX := 1 to len(aImp)
+		If len(aImp[nX]) == 1 //Apenas
+			If ValType(aImp[nX][1]) == 'C' //Apenas titulo?
+				aAdd(aImp[nX],{}) //Adiciona linha de itens vazia
+			EndIf
+		EndIf
+
+		//+--------------------------+
+		//| Titulo do Box            |
+		//+--------------------------+
+		nLinIni	:= nLin
+		If 	aImp[nX][nIM_TITULO] <> NIL .And. ;
+			.Not. Empty(aImp[nX][nIM_TITULO])
+
+			nLinIni	+= nIncLinCab
+			If lBoxCab
+				::Box( nLin, nHM, nLinIni , ::nHP-nHM )
+			EndIf
+			nLin	+= nMgBoxCab
+			::SayC(	nLin 						,;	//01
+					nHM+nMgBoxCab				,;	//02
+					aImp[nX][nIM_TITULO]		,;	//03
+					@oFntCab					,;	//04
+					::nHP-( 2*(nHM+nMgBoxCab) )  )	//05
+			nLin	+= nIncLinCab
+		Else
+			nLin	+= nMgBoxCab
+		EndIf
+
+		//+-------------------------+
+		//| Itens do Box            |
+		//+-------------------------+
+		If aImp[nX][nIM_CAMPOS] <> NIL
+			For nY := 1 to len(aImp[nX][nIM_CAMPOS])
+				//Apenas texto simples
+				If ValType(aImp[nX][nIM_CAMPOS][nY]) == 'C'
+					aItens	:= {{NIL,@aImp[nX][nIM_CAMPOS][nY]}}
+				//Apenas 1 coluna
+				ElseIf ValType(aImp[nX][nIM_CAMPOS][nY][nIC_TITULO]) == 'C'
+					aItens	:= {@aImp[nX][nIM_CAMPOS][nY]}
+				//Varias colunas
+				Else
+					aItens	:= @aImp[nX][nIM_CAMPOS][nY]
+				EndIf
+
+				nTamCol		:= ( ::nHP - (2*nHM) ) / len(aItens)
+				nIncLinPro	:= nIncLinItm
+
+				//+--------------------------+
+				//| Colunas dos itens do Box |
+				//+--------------------------+
+				For nZ := 1 to len(aItens)
+
+					//+-----------------------------------------------------+
+					//| Impressao do titulo da coluna (se houver descricao) |
+					//+-----------------------------------------------------+
+					If 	aItens[nZ][nIC_TITULO] <> NIL .And. ;
+						.Not. Empty(aItens[nZ][nIC_TITULO])
+						
+						aItens[nZ][nIC_TITULO]	:= AllTrim(aItens[nZ][nIC_TITULO])
+						//Se ja houver ':' no final remove
+						If Right ( aItens[nZ][nIC_TITULO] , 1 ) == ':'
+							aItens[nZ][nIC_TITULO]	:= Left( aItens[nZ][nIC_TITULO] , len(aItens[nZ][nIC_TITULO]) - 1 )
+						EndIf
+						nQtdPto	:= Round ( ( nTab - U_CXTamTxt(aItens[nZ][nIC_TITULO],@oFntItemN,Self) ) / nTamPto , 0 ) - 3
+						If nQtdPto > 0
+							aItens[nZ][nIC_TITULO]	+= Replicate('.',nQtdPto)
+						EndIf
+						aItens[nZ][nIC_TITULO]	+= ':'
+
+						::Say( nLin, nHM + nMgBoxCab + ( (nZ-1) * nTamCol ) ,aItens[nZ][nIC_TITULO],@oFntItemN)
+						nTabDet	:= nTab
+					Else	//Sem titulo?
+						nTabDet	:= 0
+					EndIf
+
+					//+--------------------------------+
+					//| Impressao do detalhe da coluna |
+					//+--------------------------------+
+					aItens[nZ][nIC_CONTEU]	:= RTrim(aItens[nZ][nIC_CONTEU])
+
+					//Verifica se o texto cabe no espaco
+	//				nTamTxt	:= U_CXTamTxt(aItens[nZ][nIC_CONTEU],@oFntItem,Self)
+					nColIni	:= nHM + nTabDet + nMgBoxItm + ( (nZ-1) * nTamCol )
+					nEspTxt	:= nTamCol - nTabDet - ( 2 * nMgBoxItm )
+	//				If nTamTxt <= nEspTxt
+	//					::Say( nLin, nColIni ,aItens[nZ][nIC_CONTEU],@oFntItem,nEspTxt+nAjuste)
+	//				Else
+						nLinFim := ::SayJ( nLin, nColIni ,aItens[nZ][nIC_CONTEU],@oFntItem,nEspTxt+nAjuste,nIncLinItm,::nFV)
+						If ( nLinFim - nLin ) >= nIncLinPro
+							nIncLinPro	:= ( nLinFim - nLin )
+						EndIf
+	//				EndIf
+				Next
+				nLin	+= nIncLinPro
+			Next
+		EndIf
+
+		If len(aImp[nX][nIM_CAMPOS]) > 0
+			//O ultimo salto nao precisa ser uma linha inteira, basta meia linha
+			nLin	-= nIncLinItm/2
+
+			//Box dos itens
+			If lBoxItem
+				::Box( nLinIni, nHM, nLin , ::nHP-nHM )
+			EndIf
+		Else
+			nLin	:= nLinIni
+		EndIf
+
+	Next
+
+	FreeObj(oFntItemN)
+
+Return nLin
+
+//#############################################################################
+//##+==========+===============+=======+===============+======+=============+##
+//##|Programa  | CXQuebraPag   | Autor | Cirilo Rocha  | Data |   /  /      |##
+//##+==========+===============+=======+===============+======+=============+##
+//##|Descr.    | Método que testa o final da página e já imprime o rodapé e |##
+//##|          | cabeçalho nas quebras de página                            |##
+//##+==========+===========+================================================+##
+//##|   DATA   |Programador| Manutenção Efetuada                            |##
+//##+==========+===========+================================================+##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##+==========+===========+================================================+##
+//#############################################################################
+Method CXQuebraPag(	nLin		,;	// 01
+					lImpRodape	,;	// 02
+					nEspaco		,;	// 03
+					lForca		;	// 04
+								) Class CXMSPrinter
+
+	//Declaracao de variaveis----------------------------------------------------------------------
+	Local uRet				AS Variant
+	Local lFinalPag			AS Logical
+	Local lPrimPag			AS Logical
+
+	//Pula quando existe erro
+	If ::_lErro
+		Return 1
+	EndIf
+
+	//Parametros da rotina-------------------------------------------------------------------------
+	ParamType 0	VAR nLin		AS Numeric		Optional Default NIL
+	ParamType 1	VAR lImpRodape	AS Logical 		Optional DEFAULT .F.
+	ParamType 2	VAR nEspaco		AS Numeric		Optional DEFAULT 0
+	ParamType 3	VAR lForca		AS Logical 		Optional DEFAULT .F.	//Forca a quebra de pagina
+
+	//Inicializa variaveis-------------------------------------------------------------------------
+	lFinalPag	:= .F.
+	lPrimPag	:= ( nLin == NIL )
+
+	//---------------------------------------------------------------------------------------------
+	If .Not. lPrimPag
+		lFinalPag	:= Eval(::bFimLinha	,;	//01
+							nLin+nEspaco )	//02
+	EndIf
+
+	//Forca a quebra de pagina manualmente
+	If lForca
+		lFinalPag	:= .T.
+	EndIf
+
+	//Imprime rodape
+	If 	lFinalPag  .Or. ;	//Final da pagina?
+		lImpRodape 			//Forca a impressao do rodape
+
+		//Imprime rodape
+		uRet	:= Eval(::bRodape,nLin,{})
+		If uRet <> NIL
+			nLin	:= uRet
+		Else
+			nLin	:= ::nFV
+		EndIf
+
+		//Final pagina
+		::EndPage()
+	EndIf
+
+	//Imprime cabecalho
+	If 	lPrimPag    .Or. ;		//Primeira Pagina?
+		lFinalPag  				//Final da Pagina?
+
+		//Inicia nova pagina
+		::StartPage()
+
+		//Imprime cabecalho da pagina
+		uRet	:= Eval(::bCabec,nLin,Self)
+		If uRet <> NIL
+			nLin	:= uRet
+		Else
+			nLin	:= ::nVM
+		EndIf
+	EndIf
+
+Return nLin
+
+//#############################################################################
+//##+==========+===============+=======+===============+======+=============+##
+//##|Programa  | CXCabec       | Autor | Cirilo Rocha  | Data |   /  /      |##
+//##+==========+===============+=======+===============+======+=============+##
+//##|Descr.    | Impressão do cabeçalho do relatório em PDF                 |##
+//##+==========+===========+================================================+##
+//##|   DATA   |Programador| Manutenção Efetuada                            |##
+//##+==========+===========+================================================+##
+//##| 30/09/16 | Cirilo R. | Pequena correção no alinhamento                |##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##+==========+===========+================================================+##
+//#############################################################################
+Method CXCabec(;
+				) Class CXMSPrinter
+
+	//Declaracao de variaveis----------------------------------------------------------------------
+	Local nLin		AS Numeric
+	Local nIncLin	AS Numeric
+
+	//Pula quando existe erro
+	If ::_lErro
+		Return 1
+	EndIf
+
+	//---------------------------------------------------------------------------------------------
+	If ::_oFonte11 == NIL
+		::_oFonte11  := tFont():New("Arial",,11,,.F.)
+		::_oFonte11N := tFont():New("Arial",,11,,.T.)
+		
+		::_oFonte14  := tFont():New("Arial",,14,,.F.)
+		::_oFonte14N := tFont():New("Arial",,14,,.T.)
+	EndIf
+
+	//Inicializa variaveis-------------------------------------------------------------------------
+	nLin	:= ::nVM
+	nIncLin	:= ::CXTamLin(@::_oFonte11,0.85)
+
+	//Erro padrao quando pdf via job a margem superior comeca em 20
+	If (::nDevice == IMP_PDF)
+		nLin	-= ::nMS //Ajusta a posicao inicial
+		If nLin < 0
+			nLin	:= 0
+		EndIf
+	EndIf
+
+	//---------------------------------------------------------------------------------------------
+	//+----------------------------------+
+	//| Inicio da impressao do cabecalho |
+	//+----------------------------------+
+
+	//Imprime logomarca
+	::SayBitmap( nLin , ::nHM, ::cLogo, 5 * nIncLin - 005, 5 * nIncLin - 005 )
+
+	//*********//********************************************************************
+	//  LOGO   //               NOME COMPLETO DA EMPRESA           Pagina..:      001
+	//   DA    //                                                  Impressa: 28/09/12
+	// EMPRESA //                  TITULO DO RELATORIO             Hora....: 09:54:41
+	//         //                                                  Programa:  RCOMR12
+	//*********//********************************************************************
+
+	//Imprime linhas separadoras
+	::Line(nLin-001,::nHM,nLin-001,::nFH,,::cEspLin)
+	::Line(nLin    ,::nHM,nLin    ,::nFH,,::cEspLin)  //===========================================
+	
+	nLin	+= nIncLin
+
+	::Say(nLin,::nHP-::nHM-::nTab1,"Página....:"   ,@::_oFonte11N)
+	::Say(nLin,::nHP-::nHM-::nTab2,StrZero(::nPageCount,3),@::_oFonte11 )
+	nLin	+= nIncLin/2
+
+	::SayC(nLin,::nHM,::cNomeEmp     ,@::_oFonte11N, ::nLP )
+	nLin	+= nIncLin/2
+
+	::Say(nLin,::nHP-::nHM-::nTab1,"Impressão:"   ,@::_oFonte11N)
+	::Say(nLin,::nHP-::nHM-::nTab2,DtoC(Date())   ,@::_oFonte11 )
+	nLin	+= nIncLin
+
+	::Say(nLin,::nHP-::nHM-::nTab1,"Hora.......:" ,@::_oFonte11N)
+	::Say(nLin,::nHP-::nHM-::nTab2,Time()         ,@::_oFonte11 )
+	nLin	+= nIncLin/2
+	
+	::SayC(nLin,::nHM,::cTitulo     ,@::_oFonte14N, ::nLP )
+	nLin	+= nIncLin/2
+
+	::Say(nLin,::nHP-::nHM-::nTab1,"Programa:"    ,@::_oFonte11N)
+	::Say(nLin,::nHP-::nHM-::nTab2,::cNomeProg    ,@::_oFonte11 )
+	nLin	+= nIncLin/2
+
+	//Imprime linha separadora
+	::Line(nLin-001,::nHM,nLin-001,::nFH,,::cEspLin)
+	::Line(nLin    ,::nHM,nLin    ,::nFH,,::cEspLin)  //===========================================
+	
+	nLin	+= nIncLin/2
+
+Return nLin
+
+//#############################################################################
+//##+==========+===============+=======+===============+======+=============+##
+//##|Programa  | CXRodape      | Autor | Cirilo Rocha  | Data |   /  /      |##
+//##+==========+===============+=======+===============+======+=============+##
+//##|Descr.    | Impressão do rodapé do relatório em PDF                    |##
+//##+==========+===========+================================================+##
+//##|   DATA   |Programador| Manutenção Efetuada                            |##
+//##+==========+===========+================================================+##
+//##| 20/07/16 | Cirilo R. | Adicionada impressão de assinaturas            |##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##+==========+===========+================================================+##
+//#############################################################################
+Method CXRodape(aAss;	//01
+					) Class CXMSPrinter
+
+	//Declaracao de variaveis----------------------------------------------------------------------
+	Local nLinha		AS Numeric
+	Local nX			AS Integer
+	Local nCont			AS Numeric
+
+	Local nLarAss		AS Numeric
+	Local nAltAss		AS Numeric
+	Local nAltTot		AS Numeric
+	Local nCol			AS Numeric
+	Local nQtdCol		AS Numeric
+	Local cBmpAss		AS Character
+
+	//Pula quando existe erro
+	If ::_lErro
+		Return 1
+	EndIf
+
+	//Parametros da rotina-------------------------------------------------------------------------
+	ParamType 0		VAR aAss		AS Array 		Optional DEFAULT {}
+
+	//Inicializa Variaveis-------------------------------------------------------------------------
+
+	nQtdCol	:= ::nQtdCol
+
+	If len(aAss) > 0
+		If ::GetOrientation() == nPD_PAISAGEM
+			nQtdCol	:= Round(nQtdCol*1.5,0)
+		EndIf
+
+		nLarAss	:= ( ::nLP-(nQtdCol-1)*::nEspAss ) / nQtdCol
+		nAltAss	:= nLarAss/2.5
+		nAltTot	:= (nAltAss+::nEspAss)
+		nLinha	:= ( ::nFV - nAltTot )
+
+		nCont	:= 0
+		nCol	:= ::nHM
+		For nX := 1 to len(aAss)
+
+			//+---------------------------------------------------+
+			//| Fica a sugestao de colocar tambem um texto abaixo |
+			//| da assinatura, por isso deixei a opcao do array.  |
+			//+---------------------------------------------------+
+			If ValType(aAss[nX]) == 'A'
+				cBmpAss	:= aAss[nX][1]
+			Else
+				cBmpAss	:= aAss[nX]
+			EndIf
+
+			//If U_CXFile(cBmpAss,!IsBlind()) //Existe o arquivo da assintura?
+			If U_CXFile(cBmpAss,.Not. ::_lConsole) //Existe o arquivo da assinatura?
+				::SayBitmap(nLinha	,;	//01
+							nCol	,;	//02
+							cBmpAss	,;	//03
+							nLarAss	,;	//04
+							nAltAss	 )	//05 Ver tb tx abaixo da assintaura
+				nCont++
+				nCol	+= nLarAss+::nEspAss
+				If nCont > nQtdCol
+					nLin	+=	nIncLin+nAltAss
+					nCont := 0
+					nCol 	:= ::nHM
+			 	EndIf
+	 		EndIf
+
+		Next
+
+	EndIf
+
+	//Linha final do relatorio ou pagina
+	//        01       02      03      04      05
+	::Line(::nFV-002,::nHM,::nFV-002,::nFH,,::cEspLin)
+	::Line(::nFV-001,::nHM,::nFV-001,::nFH,,::cEspLin)
+	::Line(::nFV-000,::nHM,::nFV-000,::nFH,,::cEspLin)
+
+Return ::nFV
+
+//#############################################################################
+//##+==========+===============+=======+===============+======+=============+##
+//##|Programa  | CXLinTxt      | Autor | Cirilo Rocha  | Data |   /  /      |##
+//##+==========+===============+=======+===============+======+=============+##
+//##|Descr.    | Impressão de uma linha inteira com várias colunas          |##
+//##+==========+===========+================================================+##
+//##|   DATA   |Programador| Manutenção Efetuada                            |##
+//##+==========+===========+================================================+##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##+==========+===========+================================================+##
+//#############################################################################
+Method CXLinTxt(nPLin 		,;	// 01
+				nPCol 		,;	// 02
+				aLinha 		,;	// 03
+				aDesc 		,;	// 04
+				nIncLinItm 	,;	// 05
+				nMgBoxItm  	,;	// 06
+				oFntItem  	,;	// 07
+				lForcCab	;	// 08
+						) Class CXMSPrinter
+
+	//Declaracao de variaveis----------------------------------------------------------------------
+	Local nLinFim			AS Numeric
+	Local aCabec			AS Array
+	Local nX,nY				AS Integer
+	Local lTestEsp			AS Logical
+	Local nDifLin			AS Numeric
+	Local nColIni			AS Numeric
+	Local nLinMax			AS Numeric
+	Local cTexto			AS Character
+	Local cAlinha			AS Character
+	Local oFntItemN			AS Object
+
+	//Pula quando existe erro
+	If ::_lErro
+		Return 1
+	EndIf
+
+	//Parametros da rotina-------------------------------------------------------------------------
+	ParamType 0	VAR nPLin		AS Numeric
+	ParamType 1	VAR nPCol		AS Numeric
+	ParamType 2	VAR aLinha  	AS Array
+	ParamType 3	VAR aDesc 		AS Array
+	ParamType 4	VAR nIncLinItm	AS Numeric
+	ParamType 5	VAR nMgBoxItm	AS Numeric
+	ParamType 6	VAR oFntItem	AS Object Class tFont,tFontEx
+	ParamType 7	VAR lForcCab	AS Logical				Optional DEFAULT .F.
+
+	//Inicializa Variaveis-------------------------------------------------------------------------
+	aCabec		:= {}
+	cAlinha		:= 'E'
+	lTestEsp	:= .T.
+
+	//Remapeia coordenadas
+	::CXAjPos2(	@nPLin	,;	//01
+				@nPCol	,;	//02
+				@Self	 )	//03
+
+	nLinFim		:= nPLin
+	
+	//---------------------------------------------------------------------------------------------
+	For nX := 1 to 2
+		nColIni	:= nPCol
+		For nY := 1 to len(aLinha)
+
+	 		cTexto	:= AllTrim(aLinha[nY])
+			If .Not. lTestEsp
+				//Esquerda
+				If len(aDesc[nY]) < nPD_ALINHA .Or. ;
+					aDesc[nY][nPD_ALINHA] $ 'E/L'
+		//			::Say(nPLin  + nMgBoxItm , nColIni + nMgBoxItm/2 , cTexto,@oFntItemN)
+					cAlinha	:= 'E'
+				//Centralizado
+				ElseIf aDesc[nY][nPD_ALINHA] == 'C'
+		//			::SayC(nPLin  + nMgBoxItm , nColIni, cTexto,@oFntItemN,aDesc[nY][nPD_TAMANH])
+					cAlinha	:= 'C'
+				//Direira
+				ElseIf aDesc[nY][nPD_ALINHA] $ 'D/R'
+		//			::SayR(nPLin  + nMgBoxItm , nColIni + aDesc[nY][nPD_TAMANH] - nMgBoxItm , cTexto,@oFntItemN)
+					cAlinha	:= 'D'
+				EndIf
+			EndIF
+
+			nLinMax	:= ::CXTxtBx(	nPLin					,;	//01
+									nColIni					,;	//02
+									cTexto 					,;	//03
+									@oFntItem				,;	//04
+									aDesc[nY][nPD_TAMANH] 	,;	//05
+									nIncLinItm				,;	//06
+									nMgBoxItm 				,;	//07
+									/*nPosFim*/ 			,;	//08
+									cAlinha					,;	//09
+									lTestEsp 				) 	//10
+
+			If lTestEsp
+				If nLinMax > nLinFim
+					nLinFim	:= nLinMax
+				EndIf
+			Else
+				::Box(	nPLin 							,;	//01
+						nColIni							,;	//02
+						nLinFim 						,;	//03
+						nColIni + aDesc[nY][nPD_TAMANH]  )	//04
+			EndIf
+
+			nColIni	+= aDesc[nY][nPD_TAMANH]
+		Next
+
+		If lTestEsp
+			nDifLin	:= (nLinFim - nPLin)
+
+			//Quebra pagina?
+			If Eval(::bFimLinha,nLinFim)
+				nPLin	:= Eval(::bQuebraPg,nLinFim)
+				lForcCab	:= .T.
+			EndIf
+
+			//Imprime cabecalho
+			If lForcCab
+				oFntItemN	:= tFont():New(	oFntItem:Name		,;	//01
+											oFntItem:nWidth		,;	//02
+											oFntItem:nHeight	,;	//03
+											/*uPar4*/			,;	//04
+											.T.					,;	//05
+											/*uPar6*/			,;	//06
+											/*uPar7*/			,;	//07
+											/*uPar8*/			,;	//08
+											/*uPar9*/			,;	//09
+											oFntItem:Underline	,;	//10
+											oFntItem:Italic		) 	//11
+
+				For nY := 1 to len(aDesc)
+					aAdd(aCabec,aDesc[nY][nPD_TITULO])
+				Next
+
+				//+--------------------------+
+				//| Descricoes dos itens     |
+				//+--------------------------+
+				nPLin	:= ::CXLinTxt(	nPLin 		,;	//01
+										nPCol 		,;	//02
+										aCabec 		,;	//03
+										aDesc   	,;	//04
+										nIncLinItm 	,;	//05
+										nMgBoxItm  	,;	//06
+										@oFntItemN 	) 	//07
+
+			EndIf
+
+			nLinFim	:= nPLin + nDifLin
+		EndIf
+
+		lTestEsp	:= .F.
+	Next
+
+	::_lAjPos	:= .F.
+	FreeObj(oFntItemN)
+
+Return nLinFim
+
+//#############################################################################
+//##+==========+===============+=======+===============+======+=============+##
+//##|Programa  | CXTxtBx       | Autor | Cirilo Rocha  | Data |   /  /      |##
+//##+==========+===============+=======+===============+======+=============+##
+//##|Descr.    | Impressão de texto quebrando em várias linhas              |##
+//##+==========+===========+================================================+##
+//##|   DATA   |Programador| Manutenção Efetuada                            |##
+//##+==========+===========+================================================+##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##+==========+===========+================================================+##
+//#############################################################################
+Method CXTxtBx(	nPLin		,;	//01
+				nPCol		,;	//02
+				cTexto		,;	//03
+				oFonte		,;	//04
+				nLargura	,;	//05
+				nTamLin		,;	//06
+				nMgBoxItm	,;	//07
+				nPosFim  	,;	//08
+				cAlinha		,;	//09
+				lTestEsp	;	//10
+							) Class CXMSPrinter
+
+	//Declaracao de variaveis----------------------------------------------------------------------
+	Local aTexto		AS Array
+	Local nLin			AS Numeric
+	Local nFimPag		AS Numeric
+	Local nX			AS Integer
+
+	//Pula quando existe erro
+	If ::_lErro
+		Return 1
+	EndIf
+	
+	//Otimizacao
+	If Empty(cTexto)
+		Return nPLin
+	EndIf
+
+	//Parametros da rotina-------------------------------------------------------------------------
+	ParamType 0	VAR nPLin		AS Numeric
+	ParamType 1	VAR nPCol		AS Numeric
+	ParamType 2	VAR cTexto  	AS Character
+	ParamType 3	VAR oFonte 		AS Object Class tFont,tFontEx
+	ParamType 4	VAR nLargura	AS Numeric			Optional Default ::nLP
+	ParamType 5	VAR nTamLin		AS Numeric			Optional Default ::CXTamLin(@oFonte) //Tamanho entre linhas
+	ParamType 6	VAR nMgBoxItm	AS Numeric
+	ParamType 7	VAR nPosFim		AS Numeric			Optional Default ::nVP //tamanho horizontal
+	ParamType 8	VAR cAlinha		AS Character		Optional Default 'L'
+	ParamType 9	VAR lTestEsp	AS Logical			Optional Default .F.
+
+	//---------------------------------------------------------------------------------------------
+	
+	//Remapeia coordenadas
+	::CXAjPos2(@nPLin,@nPCol,@Self)
+
+	//Inicializa Variaveis-------------------------------------------------------------------------
+	nFimPag		:= ::nVP //tamanho horizontal
+
+	nLin		:= nPLin
+	nLargura	-= nMgBoxItm
+	aTexto		:= U_CXMemoLine(cTexto	,;	//01
+								@Self	,;	//02
+								@oFonte	,;	//03
+								nLargura )	//04
+
+	//Apenas testa o espaco final da impressao para a quebra de pagina
+	If lTestEsp
+		nLin	+= ( len(aTexto) * nTamLin )
+
+	//Faz a impressao ate' o limite do espaco disponivel
+	Else
+		nPCol	+= ( nMgBoxItm/2 )
+		For nX := 1 to len(aTexto)
+			//+-------------------------------------------------+
+			//| Se ultrapassou o final do espaco para impressao |
+			//+-------------------------------------------------+
+			If 	nLin + nTamLin > nPosFim .Or. ; 	//Final do espaco passado pelo usuario
+				nLin + nTamLin > nFimPag			//Final da pagina
+
+				Exit
+			EndIf
+
+			//Esquerda
+			If cAlinha $ 'E/L'
+				::Say(	nLin+nMgBoxItm		,;	//01
+						nPCol				,;	//02
+						RTrim(aTexto[nX])	,;	//03
+						@oFonte				 )	//04
+			//Centralizado
+			ElseIf cAlinha == 'C'
+				::SayC(	nLin+nMgBoxItm		,;	//01
+						nPCol				,;	//02
+						AllTrim(aTexto[nX])	,;	//03
+						@oFonte				,;	//04
+						nLargura			 )	//05
+			//Direira
+			ElseIf cAlinha $ 'D/R'
+				::SayR(	nLin+nMgBoxItm		,;	//01
+						nPCol+nLargura		,;	//02
+						AllTrim(aTexto[nX])	,;	//03
+						@oFonte				 )	//04
+			EndIf
+
+//			::Say (nLin, nPCol, aTexto[nX] , @oFonte)
+
+			nLin  += nTamLin
+		Next
+	EndIf
+
+	::_lAjPos	:= .F.
+
+Return nLin
+
+//#############################################################################
+//##+==========+===============+=======+===============+======+=============+##
+//##|Programa  | SetResolution | Autor | Cirilo Rocha  | Data |   /  /      |##
+//##+==========+===============+=======+===============+======+=============+##
+//##|Descr.    | Sobrescrito o método padrão para salvar a resolução para   |##
+//##|          | uso nas funções de cálculo de tamanho de texto             |##
+//##+==========+===========+================================================+##
+//##|   DATA   |Programador| Manutenção Efetuada                            |##
+//##+==========+===========+================================================+##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##+==========+===========+================================================+##
+//#############################################################################
+Method SetResolution(	nResolucao 	,;	//01
+						uParam1		,;	//02
+						uParam2		,;	//03
+						uParam3		,;	//04
+						uParam4		,;	//05
+						uParam5 	;	//06
+									) Class CXMSPrinter
+
+	//Declaracao de variaveis----------------------------------------------------------------------
+	Local uRet			AS Variant		//AS Character,Numeric,Date,Array,Logical,Object,Block
+
+	//Pula quando existe erro
+	If ::_lErro
+		Return NIL
+	EndIf
+
+	//Parametros da rotina-------------------------------------------------------------------------
+	ParamType 0	VAR nResolucao	AS Numeric		Optional Default NIL
+	
+	//---------------------------------------------------------------------------------------------
+	::nResolution	:= nResolucao
+
+	uRet	:= _Super:SetResolution(nResolucao	,;	//01
+									uParam1		,;	//02
+									uParam2		,;	//03
+									uParam3		,;	//04
+									uParam4		,;	//05
+									uParam5 	) 	//06
+
+Return uRet
+
+//#############################################################################
+//##+==========+=============+=======+=================+======+=============+##
+//##|Programa  | ConvH       | Autor | Cirilo Rocha    | Data |   /  /      |##
+//##+==========+=============+=======+=================+======+=============+##
+//##|Descr.    | Método para calcular uma coordenada horizontal baseado no  |##
+//##|          | tipo da impressão (legacy/tmsprinter) ou FwMsPrinter       |##
+//##|          | SÓ PODE SER CHAMADA APÓS A EXECUÇÃO DO MÉTODO SetPaperSize |##
+//##+==========+===========+================================================+##
+//##|   DATA   |Programador| Manutenção Efetuada                            |##
+//##+==========+===========+================================================+##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##+==========+===========+================================================+##
+//#############################################################################
+Method ConvH( nPosicao ;	//01
+						) Class CXMSPrinter
+
+	//Parametros da rotina-------------------------------------------------------------------------
+	ParamType 0	VAR nPosicao	AS Numeric
+
+	//---------------------------------------------------------------------------------------------
+
+	//Pula quando existe erro
+	If ::_lErro
+		Return 1
+	EndIf
+
+	//---------------------------------------------------------------------------------------------
+
+	If .Not. ::lAdjustToLegacy
+		nPosicao /= ::nFactorHor
+	EndIf
+
+Return nPosicao
+
+//#############################################################################
+//##+==========+=============+=======+=================+======+=============+##
+//##|Programa  | ConvV       | Autor | Cirilo Rocha    | Data |   /  /      |##
+//##+==========+=============+=======+=================+======+=============+##
+//##|Descr.    | Método para calcular uma coordenada vertical baseado no    |##
+//##|          | tipo da impressão (legacy/tmsprinter) ou FwMsPrinter       |##
+//##|          | SÓ PODE SER CHAMADA APÓS A EXECUÇÃO DO MÉTODO SetPaperSize |##
+//##+==========+===========+================================================+##
+//##|   DATA   |Programador| Manutenção Efetuada                            |##
+//##+==========+===========+================================================+##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##+==========+===========+================================================+##
+//#############################################################################
+Method ConvV( nPosicao ;	//01
+						) Class CXMSPrinter
+
+	//Parametros da rotina-------------------------------------------------------------------------
+	ParamType 0	VAR nPosicao	AS Numeric
+
+	//---------------------------------------------------------------------------------------------
+
+	//Pula quando existe erro
+	If ::_lErro
+		Return 1
+	EndIf
+
+	//---------------------------------------------------------------------------------------------
+
+	If .Not. ::lAdjustToLegacy
+		nPosicao /= ::nFactorVert
+	EndIf
+
+Return nPosicao
+
+//#############################################################################
+//##+==========+==============+=======+================+======+=============+##
+//##|Programa  | GetTextWidth | Autor | Cirilo Rocha   | Data |   /  /      |##
+//##+==========+==============+=======+================+======+=============+##
+//##|Descr.    | Sobrescrito esse método para fazer o cálculo do tamanho    |##
+//##|          | exato, baseado nas orientações da Totvs SP para melhor     |##
+//##|          | precisão                                                   |##
+//##+==========+===========+================================================+##
+//##|   DATA   |Programador| Manutenção Efetuada                            |##
+//##+==========+===========+================================================+##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##+==========+===========+================================================+##
+//#############################################################################
+Method GetTextWidth(cTexto	,;	// 01
+ 					oFonte 	;	// 02
+							) Class CXMSPrinter
+
+	//Parametros da rotina-------------------------------------------------------------------------
+	ParamType 0	VAR cTexto		AS Character
+	ParamType 1	VAR oFonte		AS Object
+
+	//---------------------------------------------------------------------------------------------
+
+	//Pula quando existe erro
+	If ::_lErro
+		Return 1
+	EndIf
+
+Return U_FWTamFon(	cTexto	,;	//01
+					@oFonte	 )	//02
+
+//#############################################################################
+//##+==========+=============+=======+=================+======+=============+##
+//##|Programa  | CXAreaImp   | Autor | Cirilo Rocha    | Data | 09/03/2016  |##
+//##+==========+=============+=======+=================+======+=============+##
+//##|Descr.    | Método para setar as coordenadas para impressão do relató- |##
+//##|          | rio, sempre chamar ao alterar as margens                   |##
+//##+==========+===========+================================================+##
+//##|   DATA   |Programador| Manutenção Efetuada                            |##
+//##+==========+===========+================================================+##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##+==========+===========+================================================+##
+//#############################################################################
+Method CXAreaImp(;
+				) Class CXMSPrinter
+
+	//Pula quando existe erro
+	If ::_lErro
+		Return 1
+	EndIf
+
+	//Margens da pagina
+	::nFH	:= (::nHP - ::nHM) //Coordenada final horizontal
+	::nFV 	:= (::nVP - ::nVM) //Coordenada final vertical
+
+	::nFV	-= ::nMS				 //Ajuste da impressao em PDF (bug da totvs)
+
+	::nLP	:= (::nFH - ::nHM) //Largura disponivel
+	::nAP	:= (::nFV - ::nVM) //Altura disponivel
+
+	//Seta as variaveis de memoria da rotina origem
+	nHP 	:= ::nHP
+	nVP		:= ::nVP
+
+	nVM 	:= ::nVM
+	nHM		:= ::nHM
+
+	nFH		:= ::nFH
+	nFV		:= ::nFV
+
+	nLP		:= ::nLP
+	nAP		:= ::nAP
+
+Return
+
+//#############################################################################
+//##+==========+=============+=======+=================+======+=============+##
+//##|Programa  | ClassName   | Autor | Cirilo Rocha    | Data | 01/12/2015  |##
+//##+==========+=============+=======+=================+======+=============+##
+//##|Descr.    | Método para retornar o nome da classe atual                |##
+//##+==========+===========+================================================+##
+//##|   DATA   |Programador| Manutenção Efetuada                            |##
+//##+==========+===========+================================================+##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##+==========+===========+================================================+##
+//#############################################################################
+//Method ClassName(;
+//				)Class CXMSPrinter
+//
+//Return ::cClassName
+
+//#############################################################################
+//##+==========+=============+=======+=================+======+=============+##
+//##|Programa  | CXImpGrid   | Autor | Cirilo Rocha    | Data | 10/03/2016  |##
+//##+==========+=============+=======+=================+======+=============+##
+//##|Descr.    | Método para imprimir uma grid na página, auxiliando o posi-|##
+//##|          | cionamento dos elementos                                   |##
+//##|          | Ideal ser impressa no rodapé do relatório                  |##
+//##+==========+===========+================================================+##
+//##|   DATA   |Programador| Manutenção Efetuada                            |##
+//##+==========+===========+================================================+##
+//##| 27/04/17 | Cirilo R. | Pequena revisão na rotina                      |##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##+==========+===========+================================================+##
+//#############################################################################
+Method CXImpGrid(nEspacos;	//01
+						) Class CXMSPrinter
+
+	//Declaracao de variaveis----------------------------------------------------------------------
+	Local nX			AS Integer
+	Local oFonte07		AS Object
+	Local oFonte10		AS Object
+	Local nPosTam		AS Integer
+	Local nTamPaper		AS Integer
+	Local cTamPaper		AS Character
+	Local nIncLin		AS Numeric
+
+	//Pula quando existe erro----------------------------------------------------------------------
+	If ::_lErro
+		Return NIL
+	EndIf
+
+	//Parametros da rotina-------------------------------------------------------------------------
+	ParamType 0		VAR nEspacos  	  		AS Numeric			Optional Default 20
+
+	//Inicializa Variaveis-------------------------------------------------------------------------
+	oFonte07	:= tFont():New("Arial",07,07,,.T.)
+	oFonte10	:= tFont():New("Arial",10,10,,.T.)
+	nIncLin		:= ::CXTamLin(oFonte10,0.8)
+
+	//Linhas verticais-----------------------------------------------------------------------------
+	For nX := nEspacos to ::nHP step nEspacos
+		::CXLine(000,nX,::nVP,nX,CLR_CYAN,/*cPixel*/,/*nLineType*/) //Linha
+		::Say(040,nX+01,StrZero(nX,4), @oFonte07,,CLR_CYAN )
+	Next
+
+	//Linhas horizontais---------------------------------------------------------------------------
+	For nX := nEspacos to ::nVP step nEspacos
+		::CXLine(nX,000,nX,::nHP,CLR_CYAN,/*cPixel*/,/*nLineType*/) //Linha
+		If nX <> nEspacos //O primeiro nao precisa e' compartilhado com as duas coordenadas
+			::Say(nX+01,040,StrZero(nX,4), @oFonte07,,CLR_CYAN )
+		EndIf
+	Next
+
+	//Tamanhos da pagina---------------------------------------------------------------------------
+ 	//     linha          coluna final              texto                        fonte
+ 	::SayR(::nVP-(nIncLin*2),::nHP, "nHP = "+Transform(::nHP,"@E 9,999.99") , @oFonte10 ,CLR_HRED )	//Tamanho horizontal da pagina (sem margens)
+ 	::CXLine(000,::nHP,::nVP,::nHP,CLR_HRED,/*cPixel*/,/*nLineType*/) //Linha
+
+ 	::SayR(::nVP-nIncLin, ::nHP, "nVP = "+Transform(::nVP,"@E 9,999.99") , @oFonte10 ,CLR_HRED )	//Tamanho vertical da pagina (sem margens)
+ 	::CXLine(::nVP,000,::nVP,::nHP,CLR_HRED,/*cPixel*/,/*nLineType*/) //Linha
+
+	//Margens da pagina
+	::Say(::nVM   ,::nHM,"nHM = "+Transform(::nHM,"@E 9,999.99"),@oFonte10,,CLR_HBLUE)	//Margem horizontal da pagina
+	::CXLine(000,::nHM,::nVP,::nHM,CLR_HBLUE,/*cPixel*/,/*nLineType*/) //Linha
+
+	::Say(::nVM+nIncLin,::nHM,"nVM = "+Transform(::nVM,"@E 9,999.99"),@oFonte10,,CLR_HBLUE)	//Margem vertical da pagina
+	::CXLine(::nVM,000,::nVM,::nHP,CLR_HBLUE,/*cPixel*/,/*nLineType*/) //Linha
+
+ 	//     linha   coluna final              texto                        fonte
+ 	::SayR(nIncLin,::nFH, "nFH = "+Transform(::nFH,"@E 9,999.99") , @oFonte10 ,CLR_GREEN )	//Final horizontal
+ 	::CXLine(000,::nFH,::nVP,::nFH,CLR_GREEN,/*cPixel*/,/*nLineType*/) //Linha
+
+ 	::Say(::nFV-nIncLin,::nHM, "nFV = "+Transform(::nFV,"@E 9,999.99") , @oFonte10,,CLR_GREEN )	//Final vertical
+ 	::CXLine(::nFV,000,::nFV,::nHP,CLR_GREEN,/*cPixel*/,/*nLineType*/) //Linha
+
+	nTamPaper	:= ::PaperSize() //Tamanho papel
+	nPosTam		:= aScan(aTamPaper,{|x| x[1] == nTamPaper })
+	If nPosTam > 0
+		cTamPaper	:= aTamPaper[nPosTam][2]
+	Else
+		cTamPaper	:= 'Desconhecido '+StrZero(nTamPaper,2)
+	EndIf
+	//     linha 		 coluna  texto                                       fonte      tamanho para impressao
+ 	::SayC(::nVM    	,::nHM, "nLP = "+Transform(::nLP,"@E 9,999.99")	,  @oFonte10 , ::nLP ,  CLR_HMAGENTA)//Largura disponivel para impressao
+ 	::SayC(::nVM+nIncLin,::nHM, "Tamanho Página: "+cTamPaper 			,  @oFonte10 , ::nLP ,  CLR_HMAGENTA)//Tamanho do papel
+
+	FWFreeVar(oFonte07)
+	FWFreeVar(oFonte10)
+
+Return
+
+//#############################################################################
+//##+==========+=============+=======+=================+======+=============+##
+//##|Programa  | Preview     | Autor | Cirilo Rocha    | Data | 10/06/2016  |##
+//##+==========+=============+=======+=================+======+=============+##
+//##|Descr.    | Sobreposto o método padrão para que os arquivos temporários|##
+//##|          | sejam apagados ao final do processo E que o fonte espere a |##
+//##|          | geração do PDF ou da impressão do arquivo.                 |##
+//##+==========+===========+================================================+##
+//##|   DATA   |Programador| Manutenção Efetuada                            |##
+//##+==========+===========+================================================+##
+//##| 08/06/17 | Cirilo R. | Validar os diretórios de gravação do PDF de    |##
+//##|          |           |  acordo com os atributos lInJob e lServer      |##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##+==========+===========+================================================+##
+//#############################################################################
+Method Preview(	cPrinter,;	//01
+				uParam1	,;	//02
+				uParam2	,;	//03
+				uParam3	,;	//04
+				uParam4	,;	//05
+				uParam5	;	//06
+						) Class CXMSPrinter
+
+	//Declaracao de variaveis----------------------------------------------------------------------
+	Local uRet			AS Variant		//AS Character,Numeric,Date,Array,Logical,Object,Block
+	Local cDrive		AS Character
+	Local bImprime		AS CodeBlock
+
+	//Pula quando existe erro
+	If ::_lErro
+		Return NIL
+	EndIf
+
+	//Parametros da rotina-------------------------------------------------------------------------
+	ParamType  0	VAR cPrinter	  	AS Character				Default NIL
+
+	//Inicializa Variaveis-------------------------------------------------------------------------
+
+	//Variaveis compartilhadas de mensagens de erro
+	cMsgErr		:= IIf(Type('cMsgErr')<>'C','',cMsgErr)
+	cCodErr		:= IIf(Type('cCodErr')<>'C','',cCodErr)
+	cSoluc		:= IIf(Type('cSoluc')<>'C','',cSoluc)
+	cMsg		:= IIf(Type('cMsg')<>'C','',cMsg)
+
+	//---------------------------------------------------------------------------------------------
+	If ::nDevice == IMP_PDF
+
+		SplitPath( ::cPathPDF+'Teste.pdf', @cDrive, /*@cPDFDir*/, /*@cArqPDF*/,/*cExtensao*/)
+
+		If ( ::lInJob .Or. ::lServer )
+			If .Not. Empty(cDrive) //Path no cliente
+			
+				U_CXMsgErro('Impressão no server e o diretório é local.'+CRLF+;
+							'Diretório: '+::cPathPDF,;
+							'INFORME O SETOR DE T.I.',.Not. ::_lConsole,/*oArea*/,,self)
+
+				lErro		:= .T.	//Variavel de controle de erros
+				::_lErro	:= .T.
+
+				::cPathPDF	:= cPathDest
+			EndIf
+		Else
+			If Empty(cDrive) //Path no servidor
+
+				U_CXMsgErro('Impressão no cliente e o diretório é no servidor.'+CRLF+;
+							'Diretório: '+::cPathPDF,;
+							'INFORME O SETOR DE T.I.',.Not. ::_lConsole,/*oArea*/,,self)
+
+				lErro		:= .T.	//Variavel de controle de erros
+				::_lErro	:= .T.
+
+				::cPathPDF	:= GetTempPath() //Se for cliente gera no diretorio temporario
+			EndIf
+		EndIf
+	EndIf
+
+	//Chama metodo da classe pai (FWMSPrinter)
+	bImprime	:= {|| ::CXImprimir(cPrinter,;	//01
+									uParam1	,;	//02
+									uParam2	,;	//03
+									uParam3	,;	//04
+									uParam4	,;	//05
+									uParam5	)}	//06
+ 	If 	::_lConsole .Or. ;
+		::lInJob .Or. ;
+		FWIsInCallStack('FWMSGRUN') .Or. ;
+		FWIsInCallStack('MSGRUN') .Or. ;
+		FWIsInCallStack('PROCESSA') .Or. ;
+		FWIsInCallStack('MSAGUARDE')
+
+		Eval(bImprime)
+	Else
+		FWMsgRun(/*oSay*/,bImprime,U_CXTxtMsg()+::cTitulo,'Aguarde...')
+	EndIf
+
+Return uRet
+
+//#############################################################################
+//##+==========+=============+=======+=================+======+=============+##
+//##|Programa  | CXImprimir  | Autor | Cirilo Rocha    | Data | 08/01/2023  |##
+//##+==========+=============+=======+=================+======+=============+##
+//##|Descr.    | Método usado apenas para uso na tela de FWMsgRun           |##
+//##+==========+===========+================================================+##
+//##|   DATA   |Programador| Manutenção Efetuada                            |##
+//##+==========+===========+================================================+##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##+==========+===========+================================================+##
+//#############################################################################
+Method CXImprimir(	cPrinter,;	//01
+					uParam1	,;	//02
+					uParam2	,;	//03
+					uParam3	,;	//04
+					uParam4	,;	//05
+					uParam5	;	//06
+						) Class CXMSPrinter
+	
+	//Declaração de Variáveis----------------------------------------------------------------------
+	Local uRet			AS Variant
+
+	//---------------------------------------------------------------------------------------------
+	uRet	:=	_Super:Preview(	cPrinter,;	//01
+								uParam1	,;	//02
+								uParam2	,;	//03
+								uParam3	,;	//04
+								uParam4	,;	//05
+								uParam5	)	//06
+
+	::CXLimpaTmp() //Limpa arquivos temporarios .REL e aguarda final da impressao
+
+Return uRet
+
+//#############################################################################
+//##+==========+=============+=======+=================+======+=============+##
+//##|Programa  | Print       | Autor | Cirilo Rocha    | Data | 10/06/2016  |##
+//##+==========+=============+=======+=================+======+=============+##
+//##|Descr.    | Sobreposto o método padrão para que os arquivos temporários|##
+//##|          | sejam apagados ao final do processo E que o fonte espere a |##
+//##|          | geração do PDF ou da impressão do arquivo.                 |##
+//##+==========+===========+================================================+##
+//##|   DATA   |Programador| Manutenção Efetuada                            |##
+//##+==========+===========+================================================+##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##+==========+===========+================================================+##
+//#############################################################################
+Method Print(	cPrinter,;	//01
+				uParam1	,;	//02
+				uParam2	,;	//03
+				uParam3	,;	//04
+				uParam4	,;	//05
+				uParam5	;	//06
+						) Class CXMSPrinter
+
+	//Parametros da rotina-------------------------------------------------------------------------
+	ParamType  0	VAR cPrinter	  	AS Character				Default NIL
+
+	//Pula quando existe erro----------------------------------------------------------------------
+	If ::_lErro
+		Return NIL
+	EndIf
+
+Return ::Preview(	cPrinter,;	//01
+					uParam1	,;	//02
+					uParam2	,;	//03
+					uParam3	,;	//04
+					uParam4	,;	//05
+					uParam5	) 	//06
+
+//#############################################################################
+//##+==========+=============+=======+=================+======+=============+##
+//##|Programa  | CXLimpaTmp  | Autor | Cirilo Rocha    | Data |   /  /      |##
+//##+==========+=============+=======+=================+======+=============+##
+//##|Descr.    | Limpa arquivos temporários                                 |##
+//##+==========+===========+================================================+##
+//##|   DATA   |Programador| Manutenção Efetuada                            |##
+//##+==========+===========+================================================+##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##+==========+===========+================================================+##
+//#############################################################################
+Method CXLimpaTmp() Class CXMSPrinter
+
+	//Declaracao de variaveis----------------------------------------------------------------------
+	Local nTent		AS Integer
+	Local lApagou	AS Logical
+	Local lExiste	AS Logical
+	Local cFileTmp	AS Character
+	Local nX		AS Integer
+
+	//Inicializa Variaveis
+	nTent		:= 100
+	lApagou		:= .T.
+
+	//Variaveis compartilhadas de mensagens de erro
+	cMsgErr		:= IIf(Type('cMsgErr')<>'C','',cMsgErr)
+	cCodErr		:= IIf(Type('cCodErr')<>'C','',cCodErr)
+	cSoluc		:= IIf(Type('cSoluc')<>'C','',cSoluc)
+	cMsg		:= IIf(Type('cMsg')<>'C','',cMsg)
+
+	//+------------------------------------------------------------------+
+	//| Arquivo temporario REL na pasta do PDF                           |
+	//| Aqui eu tento excluir o arquivo .REL, se o mesmo ainda estiver   |
+	//| em uso pelo Printer.exe o sistema nao vai aceitar excluir. Entao |
+	//| aguardo 250ms e tento novamente ate o limite de 5 segundos.      |
+	//| Feito assim para tratar os casos de relatorios grandes que o     |
+	//| executavel demora para gerar o pdf.                              |
+	//+------------------------------------------------------------------+
+	Sleep(100) //Espera alguns milissegundos antes de prosseguir
+
+	If ::nDevice == IMP_PDF
+		cFileTmp	:= ::cPathPDF+FileNoExt(::cFileName)
+
+		//Espera alguns segundos para ver se gravou o PDF
+		lExiste	:= .F.
+		For nX := 1 to nTent
+			If U_CXFile(cFileTmp+'.pdf')
+				lExiste	:= .T.
+				Exit
+			EndIf
+			Sleep(150)
+		Next
+
+		If .Not. lExiste
+			lErro		:= .T.
+			::_lErro	:= .T.
+
+			cCodErr	:= U_CXTxtMsg(Self,,.T.)
+			cMsgErr	:= 'ERRO indeterminado na geração do arquivo PDF.'+CRLF+;
+						cFileTmp+'.pdf'+CRLF+;
+						::_cMsgErro
+			cSoluc	:= 'INFORME O SETOR DE T.I.'
+			cMsg	:= cCodErr+': '+cMsgErr+IIf(!Empty(cSoluc),CRLF+'SOLUÇÃO: '+cSoluc,'')
+
+			U_CXConOut(ANSIToOEM(cCodErr+'-'+cMsgErr))
+			U_CXApMsgLog(cMsgErr,,.F.,.F.,,.F.)
+		Else
+			cFileTmp	+= '.rel'
+
+			If .Not. ::CXApagaArq(cFileTmp,nTent)
+				lApagou	:= .F.
+
+				cCodErr	:= U_CXTxtMsg(Self,,.T.)
+				cMsgErr	:= 'ERRO ao apagar arquivos temporários.'+CRLF+;
+							cFileTmp
+				cSoluc	:= 'INFORME O SETOR DE T.I.'
+				cMsg	:= cCodErr+': '+cMsgErr+IIf(!Empty(cSoluc),CRLF+'SOLUÇÃO: '+cSoluc,'')
+
+				U_CXConOut(ANSIToOEM(cCodErr+'-'+cMsgErr))
+				U_CXApMsgLog(cMsg,,.F.,.F.,,.F.)
+			EndIf
+		EndIf
+
+	EndIf
+
+	//Limpar arquivo temporario .REL na pasta Spool
+	cFileTmp	:= ::cPathPrint+FileNoExt(::cFileName)+'.rel'
+	If .Not. ::CXApagaArq(cFileTmp,nTent)
+		lApagou	:= .F.
+
+		cCodErr	:= U_CXTxtMsg(Self,,.T.)
+		cMsgErr	:= 'ERRO ao apagar arquivos temporários.'+CRLF+;
+					cFileTmp
+		cSoluc	:= 'INFORME O SETOR DE T.I.'
+		cMsg	:= cCodErr+': '+cMsgErr+IIf(!Empty(cSoluc),CRLF+'SOLUÇÃO: '+cSoluc,'')
+
+		U_CXConOut(ANSIToOEM(cCodErr+'-'+cMsgErr))
+		U_CXApMsgLog(cMsg,,.F.,.F.,,.F.)
+	EndIf
+
+	If .Not. lApagou
+		//
+	EndIf
+
+Return lApagou
+
+//#############################################################################
+//##+==========+=============+=======+=================+======+=============+##
+//##|Programa  | CXApagaArq  | Autor | Cirilo Rocha    | Data |   /  /      |##
+//##+==========+=============+=======+=================+======+=============+##
+//##|Descr.    |                                                            |##
+//##|          |                                                            |##
+//##+==========+===========+================================================+##
+//##|   DATA   |Programador| Manutenção Efetuada                            |##
+//##+==========+===========+================================================+##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##+==========+===========+================================================+##
+//#############################################################################
+Method CXApagaArq(	cArquivo	,;	// 01 cArquivo	
+					nTentativas	;	// 02 nTentativas
+						) Class CXMSPrinter
+
+	//Declaracao de variaveis----------------------------------------------------------------------
+	Local nX	AS Integer
+	Local lRet	AS Logical
+
+	//Parametros da rotina-------------------------------------------------------------------------
+	//Default nTentativas	:= 100
+	ParamType 0		VAR cArquivo  	  		AS Character
+	ParamType 1		VAR nTentativas  	  	AS Numeric			Optional Default 100
+
+	//Inicializa Variaveis-------------------------------------------------------------------------
+	lRet	:= .F.
+
+	//---------------------------------------------------------------------------------------------
+
+	If File(cArquivo)
+		For nX := 1 to nTentativas
+			If fErase(cArquivo) == 0 //Apagou
+				lRet	:= .T.
+				Exit
+			EndIf
+			Sleep(100)
+		Next
+	Else
+		lRet	:= .T.
+	EndIf
+
+Return lRet
+
+//#############################################################################
+//##+==========+=============+=======+=================+======+=============+##
+//##|Programa  | CXAjustaLin | Autor | Cirilo Rocha    | Data |   /  /      |##
+//##+==========+=============+=======+=================+======+=============+##
+//##|Descr.    | Função que tenta ajustar a posição do método SayAlign com  |##
+//##|          | o Say                                                      |##
+//##+==========+===========+================================================+##
+//##|   DATA   |Programador| Manutenção Efetuada                            |##
+//##+==========+===========+================================================+##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##+==========+===========+================================================+##
+//#############################################################################
+Method CXAjustaLin(	nLin	,;	// 01 nLin
+					oFonte	;	// 02 oFonte
+						) Class CXMSPrinter
+
+	//Declaracao de variaveis----------------------------------------------------------------------
+	Local nRet	AS Numeric
+
+	//Parametros da rotina-------------------------------------------------------------------------
+	ParamType 0		VAR nLin	  	AS Numeric
+	ParamType 1		VAR oFonte	  	AS Object Class tFont,tFontEx
+
+	//---------------------------------------------------------------------------------------------
+
+	nRet	:= nLin - ( ::CXTamLin(@oFonte,0.67)+2 )
+	nRet	:= Round(nRet,0) //Tentativa de melhorar a precisao padrao
+//	::_nAdjust_Say
+
+Return nRet
+
+//#############################################################################
+//##+==========+=============+=======+=================+======+=============+##
+//##|Programa  | CXAjPos2    | Autor | Cirilo Rocha    | Data | 10/04/2019  |##
+//##+==========+=============+=======+=================+======+=============+##
+//##|Descr.    | Função para remapear posições de impressão, feita para di- |##
+//##|          | minuir o impacto das customizações em fontes padrão.       |##
+//##+==========+===========+================================================+##
+//##|   DATA   |Programador| Manutenção Efetuada                            |##
+//##+==========+===========+================================================+##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##+==========+===========+================================================+##
+//#############################################################################
+Method CXAjPos2(nLin	,;	// 01 @nLin
+				nCol	;	// 02 @nCol
+					) Class CXMSPrinter
+
+	//Declaracao de variaveis----------------------------------------------------------------------
+	Local nPos	AS Integer
+	
+	//Otimizacao
+	If 	Len(::_aPos2) == 0 .Or. ;
+		::_lAjPos
+		
+		Return
+	EndIf
+
+	//Parametros da rotina-------------------------------------------------------------------------
+	ParamType  0	VAR nLin	  	AS Numeric
+	ParamType  1	VAR nCol	  	AS Numeric
+
+	//---------------------------------------------------------------------------------------------
+	::_lAjPos	:= .T.	//Controle de loop
+	nPos		:= aScan(::_aPos2,{|x| 	( x[1] == nLin .Or. x[1] < 0 ).And. ;
+										( x[2] == nCol .Or. x[2] < 0 )		})
+	If nPos > 0
+		If 	::_aPos2[nPos][1] > 0 .And. ;
+			::_aPos2[nPos][3] > 0
+
+			nLin	:= ::_aPos2[nPos][3]
+		EndIf
+		If 	::_aPos2[nPos][2] > 0 .And. ;
+			::_aPos2[nPos][4] > 0
+			
+			nCol	:= ::_aPos2[nPos][4]
+		EndIf
+	EndIf
+
+Return
+
+//#############################################################################
+//##+==========+=============+=======+=================+======+=============+##
+//##|Programa  | CXAjPos4    | Autor | Cirilo Rocha    | Data | 10/04/2019  |##
+//##+==========+=============+=======+=================+======+=============+##
+//##|Descr.    | Função para remapear posições de impressão, feita para di- |##
+//##|          | minuir o impacto das customizações em fontes padrão.       |##
+//##+==========+===========+================================================+##
+//##|   DATA   |Programador| Manutenção Efetuada                            |##
+//##+==========+===========+================================================+##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##+==========+===========+================================================+##
+//#############################################################################
+Method CXAjPos4(nLin1	,;	// 01 @nLin1
+				nCol1	,;	// 02 @nCol1
+				nLin2	,;	// 03 @nLin2
+				nCol2	;	// 04 @nCol2
+					) Class CXMSPrinter
+
+	//Declaracao de variaveis----------------------------------------------------------------------
+	Local nPos			AS Integer
+	
+	//Otimizacao
+	If 	len(::_aPos4) == 0 .Or. ;
+		::_lAjPos
+		
+		Return
+	EndIf
+	
+	//Parametros da rotina-------------------------------------------------------------------------
+	ParamType  0	VAR nLin1	  	AS Numeric
+	ParamType  1	VAR nCol1	  	AS Numeric
+	ParamType  2	VAR nLin2	  	AS Numeric
+	ParamType  3	VAR nCol2	  	AS Numeric
+
+	//---------------------------------------------------------------------------------------------
+	::_lAjPos	:= .T.	//Controle de loop
+	nPos		:= aScan(::_aPos4,{|x| 	( x[1] == nLin1 .Or. x[1] < 0 ) .And. ;
+										( x[2] == nCol1 .Or. x[2] < 0 ) .And. ;
+										( x[3] == nLin2 .Or. x[3] < 0 ) .And. ;
+										( x[4] == nCol2 .Or. x[4] < 0 ) 	})
+	If nPos > 0
+		If 	::_aPos4[nPos][1] > 0 .And. ;
+			::_aPos4[nPos][5] > 0
+
+			nLin1	:= ::_aPos4[nPos][5]
+		EndIf
+		If 	::_aPos4[nPos][2] > 0 .And. ;
+			::_aPos4[nPos][6] > 0
+
+			nCol1	:= ::_aPos4[nPos][6]
+		EndIf
+		If 	::_aPos4[nPos][3] > 0 .And. ;
+			::_aPos4[nPos][7] > 0
+			
+			nLin2	:= ::_aPos4[nPos][7]
+		EndIf
+		If 	::_aPos4[nPos][4] > 0 .And. ;
+			::_aPos4[nPos][8] > 0
+
+			nCol2	:= ::_aPos4[nPos][8]
+		EndIf
+	EndIf
+	
+Return
+
+//#############################################################################
+//##+----------+--------------+-------+-------------------+------+----------+##
+//##|Programa  | Destroy      | Autor | Cirilo Rocha      | Data |28/12/2022|##
+//##+----------+--------------+-------+-------------------+------+----------+##
+//##|Descr.    | Método destrutor da classse para limpar os objetos internos|##
+//##|          |  utilizados (como o oFileWriter)                           |##
+//##+----------+-----------+------------------------------------------------+##
+//##|   DATA   |Programador| Manutenção efetuada                            |##
+//##+----------+-----------+------------------------------------------------+##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##+----------+-----------+------------------------------------------------+##
+//#############################################################################
+Method Destroy() Class CXMSPrinter
+
+	::Cancel()
+	::DeActivate()
+	If ::_oStp <> NIL
+		If GetClassName(::_oStp) == 'CXPRINTSETUP'
+			::_oStp:Destroy()
+		EndIf
+		FWFreeVar(::_oStp)
+	EndIf
+	If ::oFileWriter <> NIL
+		FWFreeVar(::oFileWriter)
+	EndIf	
+	FwFreeArray(::_aPos2)
+	FwFreeArray(::_aPos4)
+	
+	FWFreeVar(::oFontAtu)
+	FWFreeVar(::_oFonte11)
+	FWFreeVar(::_oFonte11N)
+	FWFreeVar(::_oFonte14)
+	FWFreeVar(::_oFonte14N)
+
+	FwFreeArray(::aImages)
+	FWFreeVar(::oFontSize)
+	FWFreeVar(::oPrint)
+
+Return
+
+//-------------------------------------------------------------------------------------------------
+//FEITO ASSIM PARA UTILIZAR TAMBEM NO TOTVS FIRST
+//-------------------------------------------------------------------------------------------------
+/*/{Protheus.doc} MSColor2Hex
+Converte cor no padrao MSColor para Hexa-HTML Ex: FF0000
+
+@param   nMsColor Codigo da cor no padrao MSColor
+@return  cHex Número em hexadecimal no padrão HTML
+@author  Ricardo Mansano
+@since   29/05/2009
+@version 10.1.1.4
+/*/
+//-------------------------------------------------------------------------------------------------
+User Function MSColor2Hex(nMsColor)	//01
+
+	//Declaracao de variaveis----------------------------------------------------------------------
+	Local cHex		AS Character
+
+	//Parametros da rotina-------------------------------------------------------------------------
+	ParamType  0	VAR nMsColor	  	AS Numeric
+
+	//Inicializa variaveis-------------------------------------------------------------------------
+	cHex := NToC(nMsColor,16)
+
+	// Trata cor Preta = 0
+	If nMsColor == CLR_BLACK
+		Return("000000")
+	Endif
+
+	// Preenche String para ser convertida em Hexa
+	If Len(cHex) < 6
+		cHex := StrZero(Val(cHex),6)
+	Endif
+
+	// Reposiciona codigo em Hexa para o padrão HTML Ex: "FF0000"
+	cHex := SubStr(cHex,5,2)+SubStr(cHex,3,2)+SubStr(cHex,1,2)
+
+Return( cHex )
+

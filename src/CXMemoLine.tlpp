@@ -1,0 +1,239 @@
+#INCLUDE "Protheus.ch"
+#INCLUDE "RWMake.ch"
+#Include "Font.ch"
+#Include "ParmType.ch"
+#Include "CXInclude.ch"
+
+//#############################################################################
+//##+----------+--------------+-------+-----------------+------+------------+##
+//##|Programa  | CXMemoLine   | Autor | Cirilo Rocha    | Data | 09/01/2012 |##
+//##+----------+--------------+-------+-----------------+------+------------+##
+//##|Desc.     | Função para quebrar um texto memo em várias linhas, usada  |##
+//##|          | para otimizar o espaço da impressão                        |##
+//##|          |                                                            |##
+//##|          | Pode ser utilizado com o parâmetro objeto oPrinter para re-|##
+//##|          | latórios gráficos, ou sem ele para relatórios texto.       |##
+//##|          |                                                            |##
+//##|          | Existe um bug no fonte padrão que não retorna corretamente |##
+//##|          | o tamanho do texto gráfico.                                |##
+//##+----------+------------------------------------------------------------+##
+//##|          |  nTamLin := oPrn:nHorzRes()-150                            |##
+//##|Uso       |  aTxtSerc	:= U_CXMemoLine(_memo,oPrn,oFont,nTamLin)       |##
+//##|          |  For i := 1 to len(aTxtSerc)                               |##
+//##|          |  	oPrn:Say(300+(i*50),050 , aTxtSerc[i] ,oFont4)          |##
+//##|          |  Next                                                      |##
+//##+----------+-----------+------------------------------------------------+##
+//##|   DATA   |Programador| Manutenção efetuada                            |##
+//##+----------+-----------+------------------------------------------------+##
+//##| 27/01/12 | Cirilo R. | Otimização na execução do fonte                |##
+//##| 08/02/12 | Cirilo R. | Pequena melhoria no alinhamento                |##
+//##|          |           | Pequena melhoria na obtenção do tamanho do tex-|##
+//##|          |           |  to usando a função CXTamTxt                   |##
+//##| 11/10/12 | Cirilo R. | Otimização para não chamar tantas vezes a fun- |##
+//##|          |           |  ção CXTamTxt                                  |##
+//##| 01/10/14 | Cirilo R. | Ajuste para considerar CHR(10) como quebra de  |##
+//##|          |           |  linha                                         |##
+//##| 27/01/15 | Cirilo R. | Pequena melhoria na precisão da quebra         |##
+//##| 24/04/18 | Cirilo R. | Ajustes para quando o ambiente não esta carre- |##
+//##|          |           |  gado                                          |##
+//##| 03/01/19 | Cirilo R. | Pequena revisão no fonte                       |##
+//##| 12/11/21 | Cirilo R. | Pequena revisão no fonte                       |##
+//##| 23/03/23 | Cirilo R. | Pequena otimização para relatórios legado      |##
+//##|          |           |                                                |##
+//##|          |           |                                                |##
+//##+----------+-----------+------------------------------------------------+##
+//#############################################################################
+User Function CXMemoLine(	cString		,;	//01 cString
+							oPrinter	,;	//02 oPrinter
+							oFonte		,;	//03 oFonte
+							nTam		,;	//04 nTam
+							lPalavras	,;	//05 lPalavras
+							lJustifica	,;	//06 lJustifica
+							nEspTab		);	//07 nEspTab
+									AS Array
+	
+	//Declaracao de variaveis----------------------------------------------------------------------
+	Local aRet			AS Array
+	Local cCaractere 	AS Character
+	Local cCharEsp		AS Character
+	Local cFinal		AS Character
+	Local cLinha		AS Character
+	Local cResto		AS Character
+	Local i             AS Numeric
+	Local lLegacy		AS Logical
+	Local nInter		AS Integer
+	Local nPosEsp		AS Integer
+	Local nQtdEsp		AS Numeric
+	Local nTamChar		AS Numeric
+	Local nTamEsp		AS Numeric
+	Local nTamLinha		AS Numeric
+	Local nTamRest		AS Numeric
+	Local nTamTexto		AS Numeric
+
+	//Parametros da rotina-------------------------------------------------------------------------
+	ParamType 0		VAR cString		AS Character
+	ParamType 1		VAR oPrinter	AS Object Class FWMsPrinter,TMSPrinter,CXMsPrinter 		Optional Default NIL
+	ParamType 2		VAR oFonte		AS Object Class tFont,tFontEx		Optional Default NIL
+	ParamType 3		VAR nTam		AS Numeric
+	ParamType 4		VAR lPalavras	AS Logical							Optional Default .T.
+	ParamType 5		VAR lJustifica	AS Logical							Optional Default .T.
+	ParamType 6		VAR nEspTab		AS Numeric							Optional Default NIL	//FwSuperGetMV('MS_ESPTAB',.F.,5)
+
+	//Inicializa Variaveis-------------------------------------------------------------------------
+	aRet		:= {}
+	cLinha		:= ''
+	nTamRest	:= 0
+	nTamLinha	:= 0
+	lLegacy		:= ( oFonte == NIL )
+	
+	If lLegacy	//Otimização relatórios texto simples
+		nTamEsp		:= 1
+	Else
+		nTamEsp		:= U_CXTamTxt(space(1),@oFonte,@oPrinter)
+	EndIf
+
+	If nEspTab == NIL
+		If Select('SX6') == 0 //Ambiente nao carregado
+			nEspTab	:= 5
+		Else
+			nEspTab	:= FwSuperGetMV('MX_ESPTAB',.F.,5)
+		EndIf
+	EndIf
+
+	//Substitui o Tab por espacos
+	cString		:= StrTran(cString,'	',space(nEspTab))
+
+	nTamTexto	:= len(cString)
+
+	//Percorre a string quebrando as linhas no final do espaco
+	//ou nos caracteres CRLF
+	For i := 1 to nTamTexto
+		cCaractere	:= Substr(cString,i,1)
+		
+		If lLegacy	//Otimização relatórios texto simples
+			nTamChar	:= 1
+		Else
+			nTamChar	:= U_CXTamTxt(cCaractere,@oFonte,@oPrinter)
+		EndIf
+
+		//Otimizacao
+		nTamLinha	+= nTamChar
+
+		If i == nTamTexto 		 		//Final do texto
+			cLinha	+= cCaractere
+			//Remove a quebra de linha
+			cLinha	:= StrTran(cLinha,CRLF,'')
+			cLinha	:= StrTran(cLinha,Chr(10),'')
+
+			aAdd(aRet,cLinha)
+		ElseIf 	Right(cLinha,2) == CRLF .Or. ;  	//Quebra de linha
+				 Right(cLinha,1) == Chr(10)
+
+			//Remove a quebra de linha
+			cLinha	:= StrTran(cLinha,CRLF,'')
+			cLinha	:= StrTran(cLinha,Chr(10),'')
+
+			aAdd(aRet,cLinha)
+			cLinha	:= ''
+
+			//Otimizacao
+			nTamLinha	:= nTamChar
+
+		//Chegou ao final da linha
+		ElseIf nTamLinha > nTam .And. ;
+				(nTamLinha - nTam) > nTam - (nTamLinha - nTamChar)
+				//O espaco que passou do final e' maior que o espaco que estava antes de adiconar o caractere
+
+			//Remove a quebra de linha
+	//		cLinha	:= StrTran(cLinha,CRLF,'')
+
+			cResto		:= ''
+
+			//Otimizacao
+			nTamLinha	-= nTamChar
+			nTamRest		:= 0
+
+			If lPalavras
+				nPosEsp	:= Rat(' ',cLinha) // buscar palavra da direita para a esquerda
+				If nPosEsp > 0
+					//Texto apos o ultimo espaco
+					cResto		:= SubStr(cLinha,nPosEsp+1,len(cLinha))
+					//Texto antes do ultimo espaco
+					cLinha		:= Left(cLinha,nPosEsp-1)
+					//Tamanho do texto apos o ultimo espaco
+					If lLegacy	//Otimização relatórios texto simples
+						nTamRest	:= Len(cResto)
+					Else
+						nTamRest	:= U_CXTamTxt(cResto,@oFonte,@oPrinter)
+					EndIf
+					//Subtrai o tamanho do texto apos o espaco
+					nTamLinha	-= nTamRest
+					//Subtrai o tamanho do espaco que esta sendo retirado
+					nTamLinha	-= nTamEsp
+				EndIf
+			EndIf
+
+			nQtdEsp	:= len(cLinha)
+			//Remove espacos a direita para melhorar a justificacao
+			cLinha	:= RTrim(cLinha)
+			nQtdEsp	-= len(cLinha)
+
+			//Subtrai o tamanho dos espacos que foram retirados
+			nTamLinha	-= ( nTamEsp * nQtdEsp )
+
+			//Justifica o texto
+			If 	lJustifica .And. ;
+				lPalavras
+
+				nInter		:= 1
+				cFinal		:= ''
+				cCharEsp	:= space(1)
+				nQtdEsp		:= Round( ( nTam - nTamLinha ) / nTamEsp , 0 )
+				While 	nQtdEsp > 0 .And. ;
+						nInter < 10
+					nPosEsp		:= Rat(cCharEsp,cLinha)
+
+					//No meio da linha acrescenta espacos
+					If 	nPosEsp > 0 .And. ;
+						.Not. Empty(cLinha)
+
+						cFinal		:= space(1)+SubStr(cLinha,nPosEsp,len(cLinha))+cFinal
+						cLinha		:= Left(cLinha,nPosEsp-1)
+					//Se chegou ao inicio da linha recomeca o processo
+					Else
+						cLinha		+= cFinal
+						cFinal		:= ''
+						cCharEsp	+= space(1) //Aumenta busca em mais um espaco
+						nInter++
+						Loop
+					EndIf
+
+					nQtdEsp--
+
+				EndDo
+				cLinha	+= cFinal
+			EndIf
+
+			aAdd(aRet,cLinha)
+			cLinha 		:= cResto
+
+			//Otimizacao
+			nTamLinha	:= nTamRest
+
+			//Apaga espaco em branco se houver no inicio da quebra de linha
+			If 	len(cLinha) == 0 		.And. ; 	//Inicio de linha no proximo caracter
+				len(RTrim(cCaractere)) == 0   		//Proximo caracter e' espaco vazio
+
+				cCaractere	:= ''
+			Else
+				//Otimizacao
+				nTamLinha	+= nTamChar
+			EndIf
+		EndIf
+
+		//Caractere no final do texto
+		cLinha	+= cCaractere
+
+	Next
+	
+Return aRet
