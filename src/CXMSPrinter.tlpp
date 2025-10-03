@@ -63,21 +63,28 @@
 //##|          |           | Implementado método Destroy                    |##
 //##| 07/01/23 | Cirilo R. | Melhoria na tela de Setup                      |##
 //##|          |           | Diversas melhorias internas                    |##
-//##|          |           |                                                |##
-//##|          |           |                                                |##
+//##| 06/02/25 | Cirilo R. | Criado cache das alturas de linhas para evitar |##
+//##|          |           |  os estouros do método GetTextHeight()         |##
+//##| 01/07/25 | Cirilo R. | Tratamento de erro caso não exista o arquivo   |##
+//##|          |           |  printer.exe para geração do PDF               |##
+//##|          |           | Revisão no fonte                               |##
+//##| 24/09/25 | Cirilo R. | Adicionada opção de impressão do cabeçalho com |##
+//##|          |           |  sombreamento                                  |##
+//##|          |           | Ajustes nas quebras de página                  |##
 //##|          |           |                                                |##
 //##+==========+===========+================================================+##
 //#############################################################################
-Static	aTamPaper	:= {{ 00 , 'Customizado' 				},;
-						{ 01 , 'Letter 8 1/2 x 11 in'		},;
-						{ 09 , 'A4 210 x 297 mm' 			},;
-						{ 08 , 'A3 297 x 420 mm' 			},;
-						{ 07 , 'Executive 7 1/4 x 10 1/2 in'},;
-						{ 03 , 'Tabloid 11 x 17 in'  		} }		AS Array
+Static	aTamPaper	:= {{ 00 , 'Customizado' 				};
+					,	{ 01 , 'Letter 8 1/2 x 11 in'		};
+					,	{ 09 , 'A4 210 x 297 mm' 			};
+					,	{ 08 , 'A3 297 x 420 mm' 			};
+					,	{ 07 , 'Executive 7 1/4 x 10 1/2 in'};
+					,	{ 03 , 'Tabloid 11 x 17 in'  		};
+					}		AS Array
 //-------------------------------------------------------------------------------------------------
 Class CXMSPrinter From FWMSPrinter
 
-	//Declaracao de variaveis----------------------------------------------------------------------
+	//-- Declaração de Variáveis ----------------------------------------------
 	//PUBLIC DATA cClassName		AS Character	//NÃO RECOMENDÁVEL EM CLASSES HERDADAS
 
 	//+-----------------------------------------+
@@ -92,10 +99,10 @@ Class CXMSPrinter From FWMSPrinter
 	//+-----------------------------------------------------------------------+
 	//| Blocos de codigo para customizar cabecalho, rodape e quebra de pagina |
 	//+-----------------------------------------------------------------------+
-	PUBLIC DATA bCabec				AS CodeBlock		//Ex.: {|nLin| ImpCabec()  }
-	PUBLIC DATA bRodape				AS CodeBlock		//Ex.: {|nLin| ImpRodape() }
+	PUBLIC DATA bCabec				AS CodeBlock		//Ex.: {|nLin| sfImpCabec()  }
+	PUBLIC DATA bRodape				AS CodeBlock		//Ex.: {|nLin| sfImpRodape() }
 	PUBLIC DATA bFimLinha			AS CodeBlock		//Ex.: {|nLin| ( nLin > nFV )}
-	PUBLIC DATA bQuebraPg			AS CodeBlock		//Ex.: {|nLin,lImpRodape,nEspaco,lForca| QuebraPag(nLin,lImpRodape,nEspaco,lForca) }
+	PUBLIC DATA bQuebraPg			AS CodeBlock		//Ex.: {|nLin,lImpRodape,nEspaco,lForca| sfQuebraPag(nLin,lImpRodape,nEspaco,lForca) }
 
 	//+-----------------------------------+
 	//| Propriedades da area de impressao |
@@ -147,11 +154,12 @@ Class CXMSPrinter From FWMSPrinter
 //	PRIVATE Data _lFWrite			AS Logical
 	PRIVATE Data _lConsole			AS Logical
 	PRIVATE Data _lAjPos			AS Logical
+	PRIVATE Data _jCacheFont		AS Json
 
-	//---------------------------------------------------------------------------------------------
+	//-------------------------------------------------------------------------
 	PUBLIC METHOD New() Constructor
 
-	//Metodos Customizados
+	//-- Métodos Customizados -------------------------------------------------
 	PUBLIC METHOD CXCabec()			AS Numeric
 	PUBLIC METHOD CXRodape()		AS Numeric
 	PUBLIC METHOD CXLine()
@@ -171,7 +179,7 @@ Class CXMSPrinter From FWMSPrinter
 	PUBLIC METHOD ConvH()			AS Numeric
 	PUBLIC METHOD ConvV()			AS Numeric
 
-	//Metodos padrao sobrescritos
+	//-- Métodos Padrão Sobrescritos ------------------------------------------
 	PUBLIC METHOD Line()
 	PUBLIC METHOD Box()
 	PUBLIC METHOD BoxFill()
@@ -180,6 +188,7 @@ Class CXMSPrinter From FWMSPrinter
 	PUBLIC METHOD Code128C()
 	PUBLIC METHOD QRCode()
 	PUBLIC METHOD Setup()
+	PUBLIC METHOD FillRect()
 
 	PUBLIC METHOD SayBitmap()
 	PUBLIC METHOD SetPaperSize()
@@ -191,8 +200,8 @@ Class CXMSPrinter From FWMSPrinter
 	//PUBLIC METHOD ClassName()	AS Character	//NÃO RECOMENDÁVEL EM CLASSES HERDADAS
 	PUBLIC METHOD Destroy()
 	
-	//Métodos internos
-	PUBLIC METHOD CXImprimir()
+	//-- Métodos Internos ---------------------------------------------------
+	PUBLIC METHOD CXImprimir()		//-- PRECISA SER PÚBLIC PARA SER USADO NA FWMSGRUN
 
 	PRIVATE METHOD CXLimpaTmp()		AS Logical
 	PRIVATE METHOD CXApagaArq()		AS Logical
@@ -217,48 +226,38 @@ EndClass
 //##|          |           |                                                |##
 //##+==========+===========+================================================+##
 //#############################################################################
-Method New(	cFilePrinter	,;	//01 Nome do arquivo temporaria de impressao
-			nDevice			,;	//02 Tipo de impressao (spool,pdf,etc.)
-			lAdjustToLegacy	,;	//03 Ajuste para utilizar as mesmas coordenadas da classe TMSPrinter (COMPATIBILIDADE)
-			cPathInServer	,;	//04 Diretorio de impressao temporario
-			lDisabeSetup	,;	//05 Inibe a tela de setup na abertura do objeto (Def .T.)
-			lTReport		,;	//06 Indica que a classe foi chamada pelo TReport.
-			oPrintSetup		,;	//07 Objeto FWPrintSetup instanciado pelo usuário
-			cPrinter		,;	//08 Impressora selecionada
-			lServer			,;	//09 Indica impressao no servidor (console)
-			lPDFAsPNG		,;	//10 Indica que sera gerado o PDF no formato PNG
-			lRaw			,;	//11 Enviar para a dispositivo de impressao caracteres binários(RAW)
-			lViewPDF		,;	//12 Desabilita o preview do PDF
-			nQtdCopies		,;	//13 Quantidade de copias
-			uParam1			,;	//14
-			uParam2			,;	//15
-			uParam3			,;	//16
-			uParam4			,;	//17
-			uParam5 		);	//18
-						Class CXMSPrinter
-
-	//Declaracao de variaveis----------------------------------------------------------------------
+Method New(	cFilePrinter	AS Character;	//01 cFilePrinter 	Nome do arquivo temporaria de impressao
+		,	nDevice			AS Numeric	;	//02 nDevice		Tipo de impressao (spool,pdf,etc.)
+		,	lAdjustToLegacy	AS Logical	;	//03 lAdjustToLegacy 	Ajuste para utilizar as mesmas coordenadas da classe TMSPrinter (COMPATIBILIDADE)
+		,	cPathInServer	AS Character;	//04 cPathInServer 	Diretorio de impressao temporario
+		,	lDisabeSetup	AS Logical  ;	//05 lDisabeSetup 	Inibe a tela de setup na abertura do objeto (Def .T.)
+		,	lTReport		AS Logical	;	//06 lTReport	 	Indica que a classe foi chamada pelo TReport.
+		,	oPrintSetup		AS Object 	;	//07 oPrintSetup	Objeto FWPrintSetup instanciado pelo usuário
+		,	cPrinter		AS Character;	//08 cPrinter	 	Impressora selecionada
+		,	lServer			AS Logical 	;	//09 lServer		Indica impressao no servidor (console)
+		,	lPDFAsPNG		AS Logical	;	//10 lPDFAsPNG	 	Indica que sera gerado o PDF no formato PNG
+		,	lRaw			AS Logical 	;	//11 lRaw		 	Enviar para a dispositivo de impressao caracteres binários(RAW)
+		,	lViewPDF		AS Logical 	;	//12 lViewPDF	 	Desabilita o preview do PDF
+		,	nQtdCopies		AS Numeric 	;	//13 nQtdCopies	 	Quantidade de copias
+		,	uParam1			AS Variant	;	//14
+		,	uParam2			AS Variant	;	//15
+		,	uParam3			AS Variant	;	//16
+		,	uParam4			AS Variant	;	//17
+		,	uParam5 		AS Variant	;	//18
+		)									Class CXMSPrinter
+	
+	//-- Declaração de Variáveis ----------------------------------------------
 	//Local cPath	:= GetSrvProfString("Startpath","")
 	Local lBuffer		AS Logical
 	Local cNewFile		AS Character
 	Local nX			AS Integer
 
-	//Parametros da rotina-------------------------------------------------------------------------
-	ParamType 0		VAR cFilePrinter 	AS Character
-	ParamType 1		VAR nDevice  	  	AS Numeric		Optional Default NIL //IMP_SPOOL
-	ParamType 2		VAR lAdjustToLegacy AS Logical		Optional Default NIL //.F.
-	ParamType 3		VAR cPathInServer 	AS Character	Optional Default NIL //GetTempPath()
-	ParamType 4		VAR lDisabeSetup 	AS Logical     	Optional Default .F.
-	ParamType 5		VAR lTReport  		AS Logical		Optional Default NIL //.F.
+	//-- Parâmetros da Rotina -------------------------------------------------
+	ParamObg 0		VAR cFilePrinter
+	Default lDisabeSetup 	:= .F.
 	ParamType 6		VAR oPrintSetup 	AS Object Class FWPrintSetup,CXPrintSetup 	Optional
-	ParamType 7		VAR cPrinter 		AS Character	Optional Default NIL //""
-	ParamType 8		VAR lServer  		AS Logical 		Optional Default NIL //.F.
-	ParamType 9		VAR lPDFAsPNG 		AS Logical		Optional Default NIL //.T.
-	ParamType 10	VAR lRaw 			AS Logical 		Optional Default NIL //.T.
-	ParamType 11	VAR lViewPDF  		AS Logical 		Optional Default NIL //.T.
-	ParamType 12	VAR nQtdCopies 		AS Numeric 		Optional Default NIL // 1
 
-	//Inicializa variaveis-------------------------------------------------------------------------
+	//-- Inicializa Variáveis -------------------------------------------------
 	//::cClassName	:= 'CXMSPrinter'  	//Nome da classe
 	::_lErro		:= .F.
 	::_lBoxLegacy	:= .F.
@@ -267,6 +266,7 @@ Method New(	cFilePrinter	,;	//01 Nome do arquivo temporaria de impressao
 	::_cMsgErro		:= ''
 	::_aPos2		:= {}
 	::_aPos4		:= {}
+	::_jCacheFont	:= JsonObject():New()
 
 	//Variaveis compartilhadas de mensagens de erro
 	cMsgErr		:= IIf(Type('cMsgErr')<>'C','',cMsgErr)
@@ -308,34 +308,35 @@ Method New(	cFilePrinter	,;	//01 Nome do arquivo temporaria de impressao
 	//  DO SETUP. PARA RESOLVER ENTÃO DEIXO lDisabeSetup = .T. E oPrintSetup = NIL
 
 	//Chama construtor da classe pai (FWMSPrinter)-------------------------------------------------
-	_Super:New(	cFilePrinter			,;	// 01
-				nDevice					,;	// 02
-				lAdjustToLegacy			,;	// 03
-				cPathInServer			,;	// 04
-				.T./*::lDisabeSetup*/	,;	// 05
-				lTReport				,;	// 06
-				/*@oPrintSetup*/		,;	// 07
-				cPrinter				,;	// 08
-				lServer					,;	// 09
-				lPDFAsPNG				,;	// 10
-				lRaw					,;	// 11
-				lViewPDF				,;	// 12
-				nQtdCopies				,;	// 13
-				uParam1					,;	// 14
-				uParam2					,;	// 15
-				uParam3					,;	// 16
-				uParam4					,;	// 17
-				uParam5					)	// 18
+	_Super:New(	cFilePrinter			;	// 01 cFilePrinter 	Nome do arquivo temporaria de impressao
+			,	nDevice					;	// 02 nDevice		Tipo de impressao (spool,pdf,etc.)
+			,	lAdjustToLegacy			;	// 03 lAdjustToLegacy 	Ajuste para utilizar as mesmas coordenadas da classe T
+			,	cPathInServer			;	// 04 cPathInServer Diretorio de impressao temporario
+			,	.T./*::lDisabeSetup*/	;	// 05 lDisabeSetup 	Inibe a tela de setup na abertura do objeto (Def .T.)
+			,	lTReport				;	// 06 lTReport	 	Indica que a classe foi chamada pelo TReport.
+			,	/*@oPrintSetup*/		;	// 07 oPrintSetup	Objeto FWPrintSetup instanciado pelo usuário
+			,	cPrinter				;	// 08 cPrinter	 	Impressora selecionada
+			,	lServer					;	// 09 lServer		Indica impressao no servidor (console)
+			,	lPDFAsPNG				;	// 10 lPDFAsPNG	 	Indica que sera gerado o PDF no formato PNG
+			,	lRaw					;	// 11 lRaw		 	Enviar para a dispositivo de impressao caracteres binários
+			,	lViewPDF				;	// 12 lViewPDF	 	Desabilita o preview do PDF
+			,	nQtdCopies				;	// 13 nQtdCopies	Quantidade de copias
+			,	uParam1					;	// 14
+			,	uParam2					;	// 15
+			,	uParam3					;	// 16
+			,	uParam4					;	// 17
+			,	uParam5					;	// 18
+			)
 						//Inicializador padrao?
 	::_cFilePrinter	:= cFilePrinter
 
-	//Ajuste para mesmas coordenadas do objeto TMSPrinter------------------------------------------
+	//-- Ajuste para mesmas coordenadas do objeto TMSPrinter ------------------
 	If lAdjustToLegacy
 		::nAdjustFont 	:=  1
 		::nAdjustSay	:= 25
 	EndIf
 
-	//Ajusta as proporcoes para o FWMsPrinter------------------------------------------------------
+	//-- Ajusta as proporções para o FWMsPrinter ------------------------------
 	::nTab1		:= 360
 	::nTab2		:= 180
 
@@ -360,7 +361,7 @@ Method New(	cFilePrinter	,;	//01 Nome do arquivo temporaria de impressao
 
 //	::SetParm("-RFS")   //Parametro orientado pela Totvs SP, nao usado porque distorceu a impressao em alguns tamanhos de fonte
 	
-	//Compatibiliza com pdf------------------------------------------------------------------------
+	//-- Compatibiliza com PDF ------------------------------------------------
 	If nDevice == IMP_PDF
 		::nHM	/=  3
 		::nVM	/=  3
@@ -387,10 +388,10 @@ Method New(	cFilePrinter	,;	//01 Nome do arquivo temporaria de impressao
 	Endif
 
 	If ::_oStp:GetProperty(PD_MARGIN) <> NIL
-		::SetMargin(::_oStp:GetProperty(PD_MARGIN)[1],;
-					::_oStp:GetProperty(PD_MARGIN)[2],;
-					::_oStp:GetProperty(PD_MARGIN)[3],;
-					::_oStp:GetProperty(PD_MARGIN)[4] )
+		::SetMargin(::_oStp:GetProperty(PD_MARGIN)[1];
+				,	::_oStp:GetProperty(PD_MARGIN)[2];
+				,	::_oStp:GetProperty(PD_MARGIN)[3];
+				,	::_oStp:GetProperty(PD_MARGIN)[4])
 	EndIf
 
 	If ::_oStp:GetProperty(PD_PAPERSIZE) <> NIL
@@ -399,7 +400,7 @@ Method New(	cFilePrinter	,;	//01 Nome do arquivo temporaria de impressao
 
     //::setCopies( Val( ::_oStp:cQtdCopia ) )	//Ja setou no New
 
-	//Verifica se ocorreu erro ao criar arquivo temporario-----------------------------------------
+	//-- Verifica se ocorreu erro ao criar arquivo temporário -----------------
 	If 	::oFileWriter <> NIL .And. ;
 		(	::oFileWriter:HasError() .Or. ;
 	 		::oFileWriter:oErroLog:HasError() .Or. ;
@@ -430,7 +431,7 @@ Method New(	cFilePrinter	,;	//01 Nome do arquivo temporaria de impressao
 		Next
 	EndIf
 
-	//Verifica se mesmo depois de tentar 10 vezes ainda esta com problema--------------------------
+	//-- Verifica se mesmo depois de tentar 10 vezes ainda esta com problema --
 	If 	::oFileWriter <> NIL .And. ;
 		(	::oFileWriter:HasError() .Or. ;
 			::oFileWriter:oErroLog:HasError() .Or. ;
@@ -485,45 +486,42 @@ Return Self
 //##|          |           |                                                |##
 //##+==========+===========+================================================+##
 //#############################################################################
-Method SayBitmap(	nRow		,;	// 01 nRow
-					nCol		,;	// 02 nCol
-					cBitmap		,;	// 03 cBitmap
-					nWidth		,;	// 04 nWidth
-					nHeight		,;	// 05 nHeight	
-					uParam1		,;	// 06 uParam1
-					uParam2		,;	// 07 uParam2	
-					uParam3		,;	// 08 uParam3	
-					uParam4		,;	// 09 uParam4	
-					uParam5		);	// 10 uParam5	
-							Class CXMSPrinter
+Method SayBitmap(	nRow		AS Numeric	;	// 01 nRow
+				,	nCol		AS Numeric	;	// 02 nCol
+				,	cBitmap		AS Character;	// 03 cBitmap
+				,	nWidth		AS Numeric	;	// 04 nWidth
+				,	nHeight		AS Numeric	;	// 05 nHeight
+				,	uParam1		AS Variant	;	// 06 uParam1
+				,	uParam2		AS Variant	;	// 07 uParam2
+				,	uParam3		AS Variant	;	// 08 uParam3
+				,	uParam4		AS Variant	;	// 09 uParam4
+				,	uParam5		AS Variant	;	// 10 uParam5
+				)			Class CXMSPrinter
 
-	//Declaracao de variaveis----------------------------------------------------------------------
+	//-- Declaração de Variáveis ----------------------------------------------
 	Local uRet			AS Variant 	//AS Character,Numeric,Date,Array,Logical,Object,Block
 
-	//Parametros da rotina-------------------------------------------------------------------------
-	ParamType 0	VAR nRow	  	AS Numeric
-	ParamType 1	VAR nCol	  	AS Numeric
-	ParamType 2	VAR cBitmap	  	AS Character
-	ParamType 3	VAR nWidth		AS Numeric		Optional Default NIL
-	ParamType 4	VAR nHeight		AS Numeric		Optional Default NIL
+	//-- Parâmetros da Rotina -------------------------------------------------
+	ParamObg 0	VAR nRow
+	ParamObg 1	VAR nCol
+	ParamObg 2	VAR cBitmap	
 
-	//---------------------------------------------------------------------------------------------
-
-	//Pula quando existe erro
+	//-- Pula quando existe erro ----------------------------------------------
 	If 	.Not. ::_lErro .And. ;
 		.Not. ::_lSemBmp
 
 		//Chama construtor da classe pai (FWMSPrinter)
-		uRet	:=	_Super:SayBitmap(	nRow	,;
-										nCol	,;
-										cBitmap	,;
-										nWidth	,;
-										nHeight	,;
-										uParam1	,;
-										uParam2	,;
-										uParam3	,;
-										uParam4	,;
-										uParam5	)						
+		uRet	:=	_Super:SayBitmap(	nRow	;
+									,	nCol	;
+									,	cBitmap	;
+									,	nWidth	;
+									,	nHeight	;
+									,	uParam1	;
+									,	uParam2	;
+									,	uParam3	;
+									,	uParam4	;
+									,	uParam5	;
+									)
 	EndIf
 
 Return uRet
@@ -542,37 +540,34 @@ Return uRet
 //##|          |           |                                                |##
 //##+==========+===========+================================================+##
 //#############################################################################
-Method SetPaperSize(nPaperSize	,;	// 01
-					nHeight		,;	// 02
-					nLarg 		,;	// 03
-					uParam1		,;	// 04
-					uParam2		,;	// 05
-					uParam3		,;	// 06
-					uParam4		,;	// 07
-					uParam5		);	// 08
-							Class CXMSPrinter
+Method SetPaperSize(nPaperSize	AS Numeric	;	// 01
+				,	nHeight		AS Numeric	;	// 02
+				,	nLarg 		AS Numeric	;	// 03
+				,	uParam1		AS Variant	;	// 04
+				,	uParam2		AS Variant	;	// 05
+				,	uParam3		AS Variant	;	// 06
+				,	uParam4		AS Variant	;	// 07
+				,	uParam5		AS Variant	;	// 08
+				)			Class CXMSPrinter
 
-	//Declaracao de variaveis----------------------------------------------------------------------
+	//-- Declaração de Variáveis ----------------------------------------------
 	Local uRet			AS Variant 	//AS Character,Numeric,Date,Array,Logical,Object,Block
 
-	//Parametros da rotina-------------------------------------------------------------------------
-	ParamType 0	VAR nPaperSize  	AS Numeric
-	ParamType 1	VAR nHeight  		AS Numeric	Optional Default NIL
-	ParamType 2	VAR nLarg	  		AS Numeric	Optional Default NIL
+	//-- Parâmetros da Rotina -------------------------------------------------
+	ParamObg 0	VAR nPaperSize
 
-	//---------------------------------------------------------------------------------------------
-
-	//Pula quando existe erro
+	//-- Pula quando existe erro ----------------------------------------------
 	If .Not. ::_lErro
 		//Chama construtor da classe pai (FWMSPrinter)
-		uRet	:=	_Super:SetPaperSize(nPaperSize	,;	// 01
-				  						nHeight		,;	// 02
-										nLarg 		,;	// 03
-										uParam1		,;	// 04
-										uParam2		,;	// 05
-										uParam3		,;	// 06
-										uParam4		,;	// 07
-										uParam5		) 	// 08
+		uRet	:=	_Super:SetPaperSize(nPaperSize	;	// 01
+				  					,	nHeight		;	// 02
+									,	nLarg 		;	// 03
+									,	uParam1		;	// 04
+									,	uParam2		;	// 05
+									,	uParam3		;	// 06
+									,	uParam4		;	// 07
+									,	uParam5		;	// 08
+									)
 	EndIf
 
 	::lAjtPDF	:= FWSuperGetMV('MX_AJTPDF',.F.,.T.) //Ajusta erro impressao PDF no servidor
@@ -594,10 +589,6 @@ Method SetPaperSize(nPaperSize	,;	// 01
 	::nTab1		:= ::ConvH(::nTab1)
 	::nTab2		:= ::ConvH(::nTab2)
 
-	//Margens da pagina
-	::nHM		:= ::ConvH(::nHM)
-	::nVM		:= ::ConvV(::nVM)
-
 	//Seta informacoes da area de impressao
 	::CXAreaImp()
 
@@ -617,35 +608,30 @@ Return uRet
 //##|          |           |                                                |##
 //##+==========+===========+================================================+##
 //#############################################################################
-Method CXLine( 	nTop		,;	// 01
-				nLeft		,;	// 02
-				nBottom		,;	// 03
-				nRight		,;	// 04
-				nColor 		,;	// 05
-				cPixel		,;	// 06
-				nLineType 	);	// 07
-						Class CXMSPrinter
+Method CXLine( 	nTop		AS Numeric	;	// 01
+			,	nLeft		AS Numeric	;	// 02
+			,	nBottom		AS Numeric	;	// 03
+			,	nRight		AS Numeric	;	// 04
+			,	nColor 		AS Numeric	;	// 05
+			,	cPixel		AS Character;	// 06
+			,	nLineType 	AS Numeric	;	// 07
+			)									Class CXMSPrinter
 
-	//Declaracao de variaveis----------------------------------------------------------------------
+	//-- Declaração de Variáveis ----------------------------------------------
 	Local cStr	AS Character
 
-	//Pula quando existe erro
-	If ::_lErro
-		Return NIL
-	EndIf
+	If ::_lErro		;		Return NIL		;	EndIf	//-- Pula quando existe erro
 
-	//Parametros da rotina-------------------------------------------------------------------------
-	ParamType 0	VAR nTop  		AS Numeric
-	ParamType 1	VAR nLeft  		AS Numeric
-	ParamType 2	VAR nBottom  	AS Numeric
-	ParamType 3	VAR nRight 		AS Numeric
-	ParamType 4	VAR nColor	  	AS Numeric		Optional DEFAULT CLR_BLACK
-	ParamType 5	VAR cPixel 		AS Character 	Optional DEFAULT ::cEspLin
-	ParamType 6	VAR nLineType	AS Numeric	 	Optional DEFAULT LN_SOLID //Linha solida
+	//-- Parâmetros da Rotina -------------------------------------------------
+	ParamObg 0	VAR nTop 
+	ParamObg 1	VAR nLeft 
+	ParamObg 2	VAR nBottom
+	ParamObg 3	VAR nRight
+	Default nColor		:= CLR_BLACK
+	Default cPixel		:= ::cEspLin
+	Default nLineType	:= LN_SOLID //Linha solida
 
-	//--------------------------------------------------------------------------------------------
-	
-	//Remapeia coordenadas
+	//-- Remapeia coordenadas -------------------------------------------------
 	::CXAjPos4(@nTop,@nLeft,@nBottom,@nRight,@Self)
 
 	cStr	:= 	"0009"						+;
@@ -682,61 +668,53 @@ Return
 //##|          |           |                                                |##
 //##+==========+===========+================================================+##
 //#############################################################################
-Method Line(nTop	,;	// 01
-			nLeft	,;	// 02
-			nBottom	,;	// 03
-			nRight	,;	// 04
-			nColor 	,;	// 05
-			cPixel	,;	// 06
-			uParam1	,;	// 07
-			uParam2	,;	// 08
-			uParam3	,;	// 09
-			uParam4	,;	// 10
-			uParam5	);	// 11
-				Class CXMSPrinter
+Method Line(nTop	AS Numeric	;	// 01
+		,	nLeft	AS Numeric	;	// 02
+		,	nBottom	AS Numeric	;	// 03
+		,	nRight	AS Numeric	;	// 04
+		,	nColor 	AS Numeric	;	// 05
+		,	cPixel	AS Character;	// 06
+		,	uParam1	AS Variant	;	// 07
+		,	uParam2	AS Variant	;	// 08
+		,	uParam3	AS Variant	;	// 09
+		,	uParam4	AS Variant	;	// 10
+		,	uParam5	AS Variant	;	// 11
+		)									Class CXMSPrinter
 
-	//Declaracao de variaveis----------------------------------------------------------------------
+	//-- Declaração de Variáveis ----------------------------------------------
 	Local uRet				AS Variant 	//AS Character,Numeric,Date,Array,Logical,Object,Block
-	Local nLineType			AS Integer
+	Local nLineType	:= 0	AS Integer	//-- Linha solida
 
-	//Pula quando existe erro
-	If ::_lErro
-		Return NIL
-	EndIf
+	If ::_lErro		;		Return NIL		;	EndIf	//-- Pula quando existe erro
 
-	//Parametros da rotina-------------------------------------------------------------------------
-	ParamType 0	VAR nTop  		AS Numeric
-	ParamType 1	VAR nLeft  		AS Numeric
-	ParamType 2	VAR nBottom  	AS Numeric
-	ParamType 3	VAR nRight 		AS Numeric
-	ParamType 4	VAR nColor	  	AS Numeric		Optional DEFAULT CLR_BLACK
-	ParamType 5	VAR cPixel 		AS Character	Optional DEFAULT ::cEspLin
+	//-- Parâmetros da Rotina -------------------------------------------------
+	ParamObg 0	VAR nTop 
+	ParamObg 1	VAR nLeft 
+	ParamObg 2	VAR nBottom
+	ParamObg 3	VAR nRight
+	Default nColor	:= CLR_BLACK
+	Default cPixel 	:= ::cEspLin
 
-	//Inicializa variaveis-------------------------------------------------------------------------
-	nLineType	:= 0  //Linha solida
+	//-- Remapeia coordenadas -------------------------------------------------
+	::CXAjPos4(	@nTop	;	//01
+			,	@nLeft	;	//02
+			,	@nBottom;	//03
+			,	@nRight	;	//04
+			,	@Self	)	//05
 
-	//--------------------------------------------------------------------------------------------
-
-	//Remapeia coordenadas
-	::CXAjPos4(	@nTop	,;	//01
-				@nLeft	,;	//02
-				@nBottom,;	//03
-				@nRight	,;	//04
-				@Self	 )	//05
-
-// 	_Super:Line(nTop	,;	//01
-//				nLeft	,;	//02
-//				nBottom	,;	//03
-//				nRight	,;	//04
-//				nColor	,;	//05
-//				cPixel	 )	//06
- 	uRet	:= ::CXLine(nTop	,;	//01
-						nLeft	,;	//02
-						nBottom	,;	//03
-						nRight	,;	//04
-						nColor	,;	//05
-						cPixel	,;	//06
-						nLineType)	//07
+// 	_Super:Line(nTop	;	//01
+//			,	nLeft	;	//02
+//			,	nBottom	;	//03
+//			,	nRight	;	//04
+//			,	nColor	;	//05
+//			,	cPixel	 )	//06
+ 	uRet	:= ::CXLine(nTop	;	//01
+					,	nLeft	;	//02
+					,	nBottom	;	//03
+					,	nRight	;	//04
+					,	nColor	;	//05
+					,	cPixel	;	//06
+					,	nLineType)	//07
 
 	::_lAjPos	:= .F.
 
@@ -756,34 +734,31 @@ Return uRet
 //##|          |           |                                                |##
 //##+==========+===========+================================================+##
 //#############################################################################
-Method Box(	nTop	,;	// 01
-			nLeft	,;	// 02
-			nBottom	,;	// 03
-			nRight	,;	// 04
-			cPixel	,;	// 05
-			uParam1	,;	// 06
-			uParam2	,;	// 07
-			uParam3	,;	// 08
-			uParam4	,;	// 09
-			uParam5	;	// 10
+Method Box(	nTop	AS Numeric	;	// 01
+		,	nLeft	AS Numeric	;	// 02
+		,	nBottom	AS Numeric	;	// 03
+		,	nRight	AS Numeric	;	// 04
+		,	cPixel	AS Character;	// 05
+		,	uParam1	AS Variant	;	// 06
+		,	uParam2	AS Variant	;	// 07
+		,	uParam3	AS Variant	;	// 08
+		,	uParam4	AS Variant	;	// 09
+		,	uParam5	AS Variant	;	// 10
 					) Class CXMSPrinter
 	
-	//Declaracao de variaveis----------------------------------------------------------------------
+	//-- Declaração de Variáveis ----------------------------------------------
 	Local uRet			AS Variant
 	
-	//Pula quando existe erro
-	If ::_lErro
-		Return NIL
-	EndIf
+	If ::_lErro		;		Return NIL		;	EndIf	//-- Pula quando existe erro
 	
-	//Parametros da rotina-------------------------------------------------------------------------
-	ParamType 0	VAR nTop  		AS Numeric
-	ParamType 1	VAR nLeft  		AS Numeric
-	ParamType 2	VAR nBottom  	AS Numeric
-	ParamType 3	VAR nRight 		AS Numeric
-	ParamType 4	VAR cPixel 		AS Character			Optional DEFAULT ::cEspLin
+	//-- Parâmetros da Rotina -------------------------------------------------
+	ParamObg 0	VAR nTop 
+	ParamObg 1	VAR nLeft 
+	ParamObg 2	VAR nBottom
+	ParamObg 3	VAR nRight
+	Default cPixel 	:= ::cEspLin
 
-	//Remapeia coordenadas
+	//-- Remapeia coordenadas -------------------------------------------------
 	::CXAjPos4(	@nTop	,;	//01
 				@nLeft	,;	//02
 				@nBottom,;	//03
@@ -791,24 +766,24 @@ Method Box(	nTop	,;	// 01
 				@Self	 )	//05
 
 	If ::_lBoxLegacy
-		uRet := _Super:Box(	nTop	,;	//01
-							nLeft	,;	//02
-							nBottom	,;	//03
-							nRight	,;	//04
-							cPixel	,;	//05
-							uParam1	,;	//06
-							uParam2	,;	//07
-							uParam3	,;	//08
-							uParam4	,;	//09
-							uParam5	) 	//10 Box padrao
+		uRet := _Super:Box(	nTop	;	//01
+						,	nLeft	;	//02
+						,	nBottom	;	//03
+						,	nRight	;	//04
+						,	cPixel	;	//05
+						,	uParam1	;	//06
+						,	uParam2	;	//07
+						,	uParam3	;	//08
+						,	uParam4	;	//09
+						,	uParam5	) 	//10 Box padrao
 	Else
-		uRet := ::CxBox(nTop			,;	//01
-						nLeft			,;	//02
-						nBottom			,;	//03
-						nRight			,;	//04
-						cPixel			,;	//05
-						/*nColor*/		,;	//06
-						/*nLineType*/	)	//07
+		uRet := ::CxBox(nTop			;	//01
+					,	nLeft			;	//02
+					,	nBottom			;	//03
+					,	nRight			;	//04
+					,	cPixel			;	//05
+					,	/*nColor*/		;	//06
+					,	/*nLineType*/	)	//07
 	EndIf
 
 	::_lAjPos	:= .F.
@@ -829,37 +804,32 @@ Return uRet
 //##|          |           |                                                |##
 //##+==========+===========+================================================+##
 //#############################################################################
-Method CxBox(	nTop		,;	// 01
-				nLeft		,;	// 02
-				nBottom		,;	// 03
-				nRight		,;	// 04
-				cPixel		,;	// 05
-				nColor		,;	// 06
-				nLineType	;	// 07
+Method CxBox(	nTop		AS Numeric	;	// 01
+			,	nLeft		AS Numeric	;	// 02
+			,	nBottom		AS Numeric	;	// 03
+			,	nRight		AS Numeric	;	// 04
+			,	cPixel		AS Character;	// 05
+			,	nColor		AS Numeric	;	// 06
+			,	nLineType	AS Numeric	;	// 07
 							) Class CXMSPrinter
 
-	//Pula quando existe erro
-	If ::_lErro
-		Return NIL
-	EndIf
+	If ::_lErro		;		Return NIL		;	EndIf	//-- Pula quando existe erro
 	
-	//Parametros da rotina-------------------------------------------------------------------------
-	ParamType 0	VAR nTop  		AS Numeric
-	ParamType 1	VAR nLeft  		AS Numeric
-	ParamType 2	VAR nBottom  	AS Numeric
-	ParamType 3	VAR nRight 		AS Numeric
-	ParamType 4	VAR cPixel 		AS Character	Optional DEFAULT ::cEspLin
-	ParamType 5	VAR nColor	  	AS Numeric		Optional DEFAULT CLR_BLACK
-	ParamType 6	VAR nLineType	AS Numeric		Optional DEFAULT LN_SOLID // Solid Line
+	//-- Parâmetros da Rotina -------------------------------------------------
+	ParamObg 0	VAR nTop 
+	ParamObg 1	VAR nLeft 
+	ParamObg 2	VAR nBottom
+	ParamObg 3	VAR nRight
+	Default cPixel 		:= ::cEspLin
+	Default nColor	  	:= CLR_BLACK
+	Default nLineType	:= LN_SOLID // Solid Line
 
-	//---------------------------------------------------------------------------------------------
-
-	//Remapeia coordenadas
-	::CXAjPos4(	@nTop	,;	//01
-				@nLeft	,;	//02
-				@nBottom,;	//03
-				@nRight	,;	//04
-				@Self	 )	//05
+	//-- Remapeia coordenadas -------------------------------------------------
+	::CXAjPos4(	@nTop	;	//01
+			,	@nLeft	;	//02
+			,	@nBottom;	//03
+			,	@nRight	;	//04
+			,	@Self	)	//05
 	
 	//         01     02      03      04      05      06       07
 	::CXLine(nTop	,nLeft	,nTop	,nRight	,nColor	,cPixel , nLineType )
@@ -885,45 +855,40 @@ Return
 //##|          |           |                                                |##
 //##+==========+===========+================================================+##
 //#############################################################################
-Method Code128C(nTop	,;	// 01
-				nLeft	,;	// 02
-				cCodeBar,;	// 03
-				nSizeBar,;	// 04
-				uPar5	,;	// 05
-				uPar6	,;	// 06
-				uPar7	,;	// 07
-				uPar8	;	// 08
+Method Code128C(nTop		AS Numeric	;	// 01
+			,	nLeft		AS Numeric	;	// 02
+			,	cCodeBar	AS Character;	// 03
+			,	nSizeBar	AS Numeric	;	// 04
+			,	uPar5		AS Variant	;	// 05
+			,	uPar6		AS Variant	;	// 06
+			,	uPar7		AS Variant	;	// 07
+			,	uPar8		AS Variant	;	// 08
 						) Class CXMSPrinter
 	
-	//Declaracao de variaveis----------------------------------------------------------------------
+	//-- Declaração de Variáveis ----------------------------------------------
 	Local uRet			AS Variant
 	
-	//Pula quando existe erro
-	If ::_lErro
-		Return NIL
-	EndIf
+	If ::_lErro		;		Return NIL		;	EndIf	//-- Pula quando existe erro
 	
-	//Parametros da rotina-------------------------------------------------------------------------
-	ParamType 0	VAR nTop  		AS Numeric
-	ParamType 1	VAR nLeft  		AS Numeric
-	ParamType 2	VAR cCodeBar	AS Character
-	ParamType 3	VAR nSizeBar  	AS Numeric
+	//-- Parâmetros da Rotina -------------------------------------------------
+	ParamObg 0	VAR nTop 
+	ParamObg 1	VAR nLeft 
+	ParamObg 2	VAR cCodeBar
+	ParamObg 3	VAR nSizeBar
 
-	//---------------------------------------------------------------------------------------------
+	//-- Remapeia coordenadas -------------------------------------------------
+	::CXAjPos2(	@nTop	;	//01
+			,	@nLeft	;	//02
+			,	@Self	)	//03
 
-	//Remapeia coordenadas
-	::CXAjPos2(	@nTop	,;	//01
-				@nLeft	,;	//02
-				@Self	 )	//03
-
-	uRet	:= _Super:Code128C(	nTop		,;	// 01
-								nLeft		,;	// 02
-								cCodeBar	,;	// 03
-								nSizeBar	,;	// 04
-								uPar5		,;	// 05
-								uPar6		,;	// 06
-								uPar7		,;	// 07
-								uPar8		)	// 08
+	uRet	:= _Super:Code128C(	nTop		;	// 01
+							,	nLeft		;	// 02
+							,	cCodeBar	;	// 03
+							,	nSizeBar	;	// 04
+							,	uPar5		;	// 05
+							,	uPar6		;	// 06
+							,	uPar7		;	// 07
+							,	uPar8		)	// 08
 	
 	::_lAjPos	:= .F.
 	
@@ -943,43 +908,38 @@ Return uRet
 //##|          |           |                                                |##
 //##+==========+===========+================================================+##
 //#############################################################################
-Method QRCode(	nTop	,;	// 01
-				nLeft	,;	// 02
-				cCodeBar,;	// 03
-				nSizeBar,;	// 04
-				uPar5	,;	// 05
-				uPar6	,;	// 06
-				uPar7	,;	// 07
-				uPar8	;	// 08
+Method QRCode(	nTop		AS Numeric	;	// 01
+			,	nLeft		AS Numeric	;	// 02
+			,	cCodeBar	AS Character;	// 03
+			,	nSizeBar	AS Numeric	;	// 04
+			,	uPar5		AS Variant	;	// 05
+			,	uPar6		AS Variant	;	// 06
+			,	uPar7		AS Variant	;	// 07
+			,	uPar8		AS Variant	;	// 08
 						) Class CXMSPrinter
 	
-	//Declaracao de variaveis----------------------------------------------------------------------
+	//-- Declaração de Variáveis ----------------------------------------------
 	Local uRet			AS Variant
 	
-	//Pula quando existe erro
-	If ::_lErro
-		Return NIL
-	EndIf
+	If ::_lErro		;		Return NIL		;	EndIf	//-- Pula quando existe erro
 	
-	//Parametros da rotina-------------------------------------------------------------------------
-	ParamType 0	VAR nTop  		AS Numeric
-	ParamType 1	VAR nLeft  		AS Numeric
-	ParamType 2	VAR cCodeBar	AS Character
-	ParamType 3	VAR nSizeBar  	AS Numeric
+	//-- Parâmetros da Rotina -------------------------------------------------
+	ParamObg 0	VAR nTop 
+	ParamObg 1	VAR nLeft 
+	ParamObg 2	VAR cCodeBar
+	ParamObg 3	VAR nSizeBar
 
-	//---------------------------------------------------------------------------------------------
-
-	//Remapeia coordenadas
+	//-- Remapeia coordenadas -------------------------------------------------
 	::CXAjPos4(@nTop,@nLeft,0,@nSizeBar,@Self)
 
-	uRet	:= _Super:QRCode(	nTop		,;	// 01
-								nLeft		,;	// 02
-								cCodeBar	,;	// 03
-								nSizeBar	,;	// 04
-								uPar5		,;	// 05
-								uPar6		,;	// 06
-								uPar7		,;	// 07
-								uPar8		)	// 08
+	uRet	:= _Super:QRCode(	nTop		;	// 01
+							,	nLeft		;	// 02
+							,	cCodeBar	;	// 03
+							,	nSizeBar	;	// 04
+							,	uPar5		;	// 05
+							,	uPar6		;	// 06
+							,	uPar7		;	// 07
+							,	uPar8		)	// 08
 	
 	::_lAjPos	:= .F.
 	
@@ -1005,8 +965,8 @@ Method Setup() Class CXMSPrinter
 		//+----------------------------------------------------------------------+
 		//| Inicializacao do objeto Setup Print com as propriedades de impressao |
 		//+----------------------------------------------------------------------+
-		::_oStp	:= CXPrintSetup():New(	/*nFlags*/			,;	//01
-										::_cFilePrinter		 )	//02
+		::_oStp	:= CXPrintSetup():New(	/*nFlags*/			;	//01
+									,	::_cFilePrinter		)	//02
 	EndIf
 
 	//Chama tela de setup
@@ -1028,53 +988,48 @@ Return
 //##|          |           |                                                |##
 //##+==========+===========+================================================+##
 //#############################################################################
-Method BoxFill(	nTop	,;	// 01
-				nLeft	,;	// 02
-				nBottom	,;	// 03
-				nRight	,;	// 04
-				cPixel	,;	// 05
-				uParam1	,;	// 06
-				uParam2	,;	// 07
-				uParam3	,;	// 08
-				uParam4	,;	// 09
-				uParam5	;	// 10
+Method BoxFill(	nTop	AS Numeric	;	// 01
+			,	nLeft	AS Numeric	;	// 02
+			,	nBottom	AS Numeric	;	// 03
+			,	nRight	AS Numeric	;	// 04
+			,	cPixel	AS Character;	// 05
+			,	uParam1	AS Variant	;	// 06
+			,	uParam2	AS Variant	;	// 07
+			,	uParam3	AS Variant	;	// 08
+			,	uParam4	AS Variant	;	// 09
+			,	uParam5	AS Variant	;	// 10
 						) Class CXMSPrinter
 
-	//Declaracao de variaveis----------------------------------------------------------------------
+	//-- Declaração de Variáveis ----------------------------------------------
 	Local uRet			AS Variant
 
-	//Pula quando existe erro
-	If ::_lErro
-		Return NIL
-	EndIf
+	If ::_lErro		;		Return NIL		;	EndIf	//-- Pula quando existe erro
 
-	//Parametros da rotina-------------------------------------------------------------------------
-	ParamType 0	VAR nTop  		AS Numeric
-	ParamType 1	VAR nLeft  		AS Numeric
-	ParamType 2	VAR nBottom  	AS Numeric
-	ParamType 3	VAR nRight 		AS Numeric
-	ParamType 4	VAR cPixel 		AS Character		 	Optional DEFAULT ::cEspLin
+	//-- Parâmetros da Rotina -------------------------------------------------
+	ParamObg 0	VAR nTop 
+	ParamObg 1	VAR nLeft 
+	ParamObg 2	VAR nBottom
+	ParamObg 3	VAR nRight
+	Default cPixel 	:= ::cEspLin
 
-	//---------------------------------------------------------------------------------------------
-
-	//Remapeia coordenadas
-	::CXAjPos4(	@nTop	,;	//01
-				@nLeft	,;	//02
-				@nBottom,;	//03
-				@nRight	,;	//04
-				@Self	 )	//05
+	//-- Remapeia coordenadas -------------------------------------------------
+	::CXAjPos4(	@nTop	;	//01
+			,	@nLeft	;	//02
+			,	@nBottom;	//03
+			,	@nRight	;	//04
+			,	@Self	)	//05
 	
 	//Box padrao
-	uRet	:= _Super:Box(	nTop	,;	// 01
-							nLeft	,;	// 02
-							nBottom	,;	// 03
-							nRight	,;	// 04
-							cPixel	,;	// 05
-							uParam1	,;	// 06
-							uParam2	,;	// 07
-							uParam3	,;	// 08
-							uParam4	,;	// 09
-							uParam5	) 	// 10
+	uRet	:= _Super:Box(	nTop	;	// 01
+						,	nLeft	;	// 02
+						,	nBottom	;	// 03
+						,	nRight	;	// 04
+						,	cPixel	;	// 05
+						,	uParam1	;	// 06
+						,	uParam2	;	// 07
+						,	uParam3	;	// 08
+						,	uParam4	;	// 09
+						,	uParam5	) 	// 10
 	
 	::_lAjPos	:= .F.
 	
@@ -1096,87 +1051,77 @@ Return uRet
 //##|          |           |                                                |##
 //##+==========+===========+================================================+##
 //#############################################################################
-Method Say(	nPLin	,;	// 01
-			nPCol	,;	// 02
-			cTexto	,;	// 03
-			oFonte	,;	// 04
-			nLargura,;	// 05
-			nClrText,;	// 06
-			nAngle  ,;	// 07
-			uParam1	,;	// 08
-			uParam2	,;	// 09
-			uParam3	,;	// 10
-			uParam4	,;	// 11
-			uParam5	;	// 12
+Method Say(	nPLin		AS Numeric	;	// 01
+		,	nPCol		AS Numeric	;	// 02
+		,	cTexto		AS Character;	// 03
+		,	oFonte		AS Object 	;	// 04
+		,	nLargura	AS Numeric	;	// 05
+		,	nClrText	AS Numeric	;	// 06
+		,	nAngle  	AS Numeric	;	// 07
+		,	uParam1		AS Variant	;	// 08
+		,	uParam2		AS Variant	;	// 09
+		,	uParam3		AS Variant	;	// 10
+		,	uParam4		AS Variant	;	// 11
+		,	uParam5		AS Variant	;	// 12
 					) Class CXMSPrinter
 
-	//Declaracao de variaveis----------------------------------------------------------------------
-	Local uRet				AS Variant 	//AS Character,Numeric,Date,Array,Logical,Object,Block
-	Local nAlignVert		AS Numeric
-	Local nAlignHorz		AS Numeric
-	Local nAltura			AS Numeric
-	Local nLin				AS Numeric
-	Local nCol				AS Numeric
+	//-- Declaração de Variáveis ----------------------------------------------
+	Local uRet										AS Variant 	//AS Character,Numeric,Date,Array,Logical,Object,Block
+	Local nAlignVert	:= nALV_SUPERIOR			AS Numeric
+	Local nAlignHorz	:= nALH_ESQUERDA			AS Numeric
+	Local nAltura									AS Numeric
+	Local nLin										AS Numeric
+	Local nCol										AS Numeric
 
-	//Pula quando existe erro
-	If ::_lErro
-		Return NIL
-	EndIf
+	If ::_lErro		;		Return NIL		;	EndIf	//-- Pula quando existe erro
 
-	//Otimizacao
-	If Empty(cTexto)
-		Return uRet
-	EndIf
+	If Empty(cTexto)	;	Return uRet		;	EndIf	//-- Otimizacao
 
-	//Parametros da rotina-------------------------------------------------------------------------
-	ParamType 0	VAR nPLin  		AS Numeric
-	ParamType 1	VAR nPCol  		AS Numeric
-	ParamType 2	VAR cTexto  	AS Character
+	//-- Parâmetros da Rotina -------------------------------------------------
+	ParamObg 0	VAR nPLin
+	ParamObg 1	VAR nPCol
+	ParamObg 2	VAR cTexto 
 	ParamType 3	VAR oFonte 		AS Object Class tFont,tFontEx	Optional Default ::oFontAtu
-	ParamType 4	VAR nLargura	AS Numeric						Optional Default ::nHP+300  //Nao calcula muito bem o espaco disponivel
-	ParamType 5	VAR nClrText 	AS Numeric						Optional Default NIL
-	ParamType 6	VAR nAngle 		AS Numeric						Optional Default NIL
+	Default nLargura	:= ::nHP+300  //Nao calcula muito bem o espaco disponivel
 
-	//Inicializa variaveis-------------------------------------------------------------------------
-	nAlignVert	:= nALV_SUPERIOR
-	nAlignHorz	:= nALH_ESQUERDA
+	//-- Remapeia coordenadas -------------------------------------------------
+	::CXAjPos2(	@nPLin	;	//01
+			,	@nPCol	;	//02
+			,	@Self	)	//03
 
-	//Remapeia coordenadas
-	::CXAjPos2(	@nPLin	,;	//01
-				@nPCol	,;	//02
-				@Self	 )	//03
-
-	nLin		:= ::CXAjustaLin(	nPLin	,;	//01
-									@oFonte	,;	//02
-									@Self	 )	//03
+	nLin		:= ::CXAjustaLin(	nPLin	;	//01
+								,	@oFonte	;	//02
+								,	@Self	)	//03
 	nCol		:= nPCol
 	nAltura		:= 100 					//Precisa ter uma dimensao para nao causar erros na montagem
 	cTexto		:= U_CXRTrim(cTexto) 	//Remove caracteres vazio do final da string
 
-	//---------------------------------------------------------------------------------------------
+	//-------------------------------------------------------------------------
 
 //	If .Not. Empty(cTexto)
-		uRet	:= ::SayAlign(	nLin		,;	//01
-								nCol		,;	//02
-								cTexto		,;	//03
-								@oFonte		,;	//04
-								nLargura	,;	//05
-								nAltura		,;	//06
-								nClrText	,;	//07
-								nAlignHorz	,;	//08
-								nAlignVert	 )	//09
+		uRet	:= ::SayAlign(	nLin		;	//01
+							,	nCol		;	//02
+							,	cTexto		;	//03
+							,	@oFonte		;	//04
+							,	nLargura	;	//05
+							,	nAltura		;	//06
+							,	nClrText	;	//07
+							,	nAlignHorz	;	//08
+							,	nAlignVert	;	//09
+							)
 
-//		uRet	:= _Super:Say(	nLin		,;	//01
-//								nCol		,;	//02
-//								cTexto		,;	//03
-//								@oFonte		,;	//04
-//								nLargura	,;	//05
-//								nAngle		,;	//06
-//								uParam1		,;	//07
-//								uParam2		,;	//08
-//								uParam3		,;	//09
-//								uParam4		,;	//10
-//								uParam5		 )	//11
+//		uRet	:= _Super:Say(	nLin		;	//01
+//							,	nCol		;	//02
+//							,	cTexto		;	//03
+//							,	@oFonte		;	//04
+//							,	nLargura	;	//05
+//							,	nAngle		;	//06
+//							,	uParam1		;	//07
+//							,	uParam2		;	//08
+//							,	uParam3		;	//09
+//							,	uParam4		;	//10
+//							,	uParam5		;	//11
+//							)
 //	EndIf
 
 	::_lAjPos	:= .F.
@@ -1196,46 +1141,36 @@ Return uRet
 //##|          |           |                                                |##
 //##+==========+===========+================================================+##
 //#############################################################################
-Method SayR(nPLin	,;	// 01
-			nPCol	,;	// 02
-			cTexto	,;	// 03
-			oFonte	,;	// 04
-			nClrText;	// 05
+Method SayR(nPLin		AS Numeric	;	// 01
+		,	nPCol		AS Numeric	;	// 02
+		,	cTexto		AS Character;	// 03
+		,	oFonte		AS Object 	;	// 04
+		,	nClrText	AS Numeric	;	// 05
 					) Class CXMSPrinter
 	
-	//Declaracao de variaveis----------------------------------------------------------------------
-	Local uRet			AS Variant
-	Local nAlignVert	AS Numeric
-	Local nAlignHorz	AS Numeric
-	Local nLin			AS Numeric
-	Local nCol			AS Numeric
-	Local nLarg			AS Numeric
-	Local nAltura		AS Numeric
+	//-- Declaração de Variáveis ----------------------------------------------
+	Local uRet										AS Variant
+	Local nAlignVert	:= nALV_SUPERIOR			AS Numeric
+	Local nAlignHorz	:= nALH_DIREITA				AS Numeric
+	Local nLin										AS Numeric
+	Local nCol										AS Numeric
+	Local nLarg										AS Numeric
+	Local nAltura									AS Numeric
 
-	//Otimizacao
-	If Empty(cTexto)
-		Return
-	EndIf
+	If Empty(cTexto)	;	Return			;	EndIf	//-- Otimizacao
 
-	//Pula quando existe erro
-	If ::_lErro
-		Return NIL
-	EndIf
+	If ::_lErro		;		Return NIL		;	EndIf	//-- Pula quando existe erro
 
-	//Parametros da rotina-------------------------------------------------------------------------
-	ParamType 0	VAR nPLin  		AS Numeric
-	ParamType 1	VAR nPCol  		AS Numeric
-	ParamType 2	VAR cTexto  	AS Character
+	//-- Parâmetros da Rotina -------------------------------------------------
+	ParamObg 0	VAR nPLin
+	ParamObg 1	VAR nPCol
+	ParamObg 2	VAR cTexto
 	ParamType 3	VAR oFonte 		AS Object Class tFont,tFontEx
 
-	//Inicializa variaveis-------------------------------------------------------------------------
-	nAlignVert	:= nALV_SUPERIOR
-	nAlignHorz	:= nALH_DIREITA
-
-	//Remapeia coordenadas
-	::CXAjPos2(	@nPLin	,;	//01
-				@nPCol	,;	//02
-				@Self	 )	//03
+	//-- Remapeia Coordenadas -------------------------------------------------
+	::CXAjPos2(	@nPLin	;	//01
+			,	@nPCol	;	//02
+			,	@Self	)	//03
 
 //	U_CXSayR(nPLin,nPCol,cTexto,oFonte,Self)  			//Desativado porque ja existe o metodo abaixo que funciona melhor
 	nLin		:= ::CXAjustaLin(nPLin,@oFonte,@Self) 	//nPLin - ( ::CXTamLin(@oFonte,0.65)+2 )
@@ -1243,16 +1178,16 @@ Method SayR(nPLin	,;	// 01
 	nLarg		:= nPCol
 	nAltura		:= 100 		//Precisa ter uma dimensao para nao causar erros na montagem
 
-	//---------------------------------------------------------------------------------------------
-	uRet	:= ::SayAlign(	nLin		,;	// 01
-							nCol		,;	// 02
-							cTexto		,;	// 03
-							@oFonte		,;	// 04
-							nLarg		,;	// 05
-							nAltura		,;	// 06
-							nClrText	,;	// 07
-							nAlignHorz	,;	// 08
-							nAlignVert	)	// 09
+	//-------------------------------------------------------------------------
+	uRet	:= ::SayAlign(	nLin		;	// 01
+						,	nCol		;	// 02
+						,	cTexto		;	// 03
+						,	@oFonte		;	// 04
+						,	nLarg		;	// 05
+						,	nAltura		;	// 06
+						,	nClrText	;	// 07
+						,	nAlignHorz	;	// 08
+						,	nAlignVert	)	// 09
 	
 	::_lAjPos	:= .F.
 
@@ -1271,70 +1206,60 @@ Return uRet
 //##|          |           |                                                |##
 //##+==========+===========+================================================+##
 //#############################################################################
-Method SayC (	nPLin	,;	// 01
-				nPCol	,;	// 02
-				cTexto	,;	// 03
-				oFonte	,;	// 04
-				nLargura,;	// 05
-				nClrText;	// 06
+Method SayC (	nPLin		AS Numeric	;	// 01
+			,	nPCol		AS Numeric	;	// 02
+			,	cTexto		AS Character;	// 03
+			,	oFonte		AS Object	;	// 04
+			,	nLargura	AS Numeric	;	// 05
+			,	nClrText	AS Numeric	;	// 06
 						) Class CXMSPrinter
 	
-	//Declaracao de variaveis----------------------------------------------------------------------
-	Local uRet			AS Variant
-	Local nAlignVert	AS Numeric
-	Local nAlignHorz	AS Numeric
-	Local nLin			AS Numeric
-	Local nCol			AS Numeric
-	Local nAltura		AS Numeric
+	//-- Declaração de Variáveis ----------------------------------------------
+	Local uRet										AS Variant
+	Local nAlignVert	:= nALV_SUPERIOR			AS Numeric
+	Local nAlignHorz	:= nALH_CENTRAL				AS Numeric
+	Local nLin										AS Numeric
+	Local nCol										AS Numeric
+	Local nAltura									AS Numeric
+	
+	If Empty(cTexto)	;	Return			;	EndIf	//-- Otimizacao
 
-	//Otimizacao
-	If Empty(cTexto)
-		Return
-	EndIf
+	If ::_lErro		;		Return NIL		;	EndIf	//-- Pula quando existe erro
 
-	//Pula quando existe erro
-	If ::_lErro
-		Return NIL
-	EndIf
-
-	//Parametros da rotina-------------------------------------------------------------------------
-	ParamType 0	VAR nPLin  		AS Numeric
-	ParamType 1	VAR nPCol  		AS Numeric
-	ParamType 2	VAR cTexto  	AS Character
+	//-- Parâmetros da Rotina -------------------------------------------------
+	ParamObg 0	VAR nPLin
+	ParamObg 1	VAR nPCol
+	ParamObg 2	VAR cTexto
 	ParamType 3	VAR oFonte 		AS Object Class tFont,tFontEx
-	ParamType 4	VAR nLargura	AS Numeric
+	ParamObg 4	VAR nLargura
 
-	//Inicializa Variaveis-------------------------------------------------------------------------
-	nAlignVert	:= nALV_SUPERIOR
-	nAlignHorz	:= nALH_CENTRAL
-
-	//Remapeia coordenadas
-	::CXAjPos2(	@nPLin	,;	//01
-				@nPCol	,;	//02
-				@Self	 )	//03
+	//-- Remapeia Coordenadas -------------------------------------------------
+	::CXAjPos2(	@nPLin	;	//01
+			,	@nPCol	;	//02
+			,	@Self	)	//03
 
 	nLin	:= ::CXAjustaLin(nPLin,@oFonte,@Self)				//nPLin - ( ::CXTamLin(@oFonte,0.65)+2 )
 	nCol	:= nPCol
 	nAltura	:= 100 //Precisa ter uma dimensao para nao causar erros na montagem
 
-	//---------------------------------------------------------------------------------------------
+	//-------------------------------------------------------------------------
 
-//	U_CXSayC(	nPLin			,;	//01
-//				nPCol			,;	//02
-//				nPCol+nLargura	,;	//03
-//				cTexto			,;	//04
-//				oFonte			,;	//05
-//				Self			 )	//06	//Desativado porque ja existe o metodo abaixo que funciona melhor
+//	U_CXSayC(	nPLin			;	//01
+//			,	nPCol			;	//02
+//			,	nPCol+nLargura	;	//03
+//			,	cTexto			;	//04
+//			,	oFonte			;	//05
+//			,	Self			)	//06	//Desativado porque ja existe o metodo abaixo que funciona melhor
 
-	uRet	:= ::SayAlign (	nLin		,;	// 01
-							nCol		,;	// 02
-							cTexto		,;	// 03
-							@oFonte		,;	// 04
-							nLargura	,;	// 05
-							nAltura		,;	// 06
-							nClrText	,;	// 07
-							nAlignHorz	,;	// 08
-							nAlignVert	)	// 09
+	uRet	:= ::SayAlign (	nLin		;	// 01
+						,	nCol		;	// 02
+						,	cTexto		;	// 03
+						,	@oFonte		;	// 04
+						,	nLargura	;	// 05
+						,	nAltura		;	// 06
+						,	nClrText	;	// 07
+						,	nAlignHorz	;	// 08
+						,	nAlignVert	)	// 09
 	
 	::_lAjPos	:= .F.
 
@@ -1354,16 +1279,17 @@ Return uRet
 //##|          |           |                                                |##
 //##+==========+===========+================================================+##
 //#############################################################################
-Method SayJ ( 	nPLin	,;	// 01
-				nPCol	,;	// 02
-				cTexto	,;	// 03
-				oFonte	,;	// 04
-				nLargura,;	// 05
-				nTamLin	,;	// 06
-				nPosFim ;	// 07
-						) Class CXMSPrinter
+Method SayJ ( 	nPLin		AS Numeric	;	// 01
+			,	nPCol		AS Numeric	;	// 02
+			,	cTexto		AS Character;	// 03
+			,	oFonte		AS Object	;	// 04
+			,	nLargura	AS Numeric	;	// 05
+			,	nTamLin		AS Numeric 	;	// 06 Tamanho entre linhas
+			,	nPosFim 	AS Numeric	;	// 07 Sem final pula pagina automaticamente
+			,	nClrText	AS Numeric	;	// 08 Cor do texto (padrão 0 - preto)
+			)			AS Numeric Class CXMSPrinter
 
-	//Declaracao de variaveis----------------------------------------------------------------------
+	//-- Declaração de Variáveis ----------------------------------------------
 	Local aTexto	AS Array
 	Local nLin		AS Numeric
 	Local nFimPag	AS Numeric
@@ -1372,40 +1298,33 @@ Method SayJ ( 	nPLin	,;	// 01
 //	Local cChar		AS Character
 //	Local nPosH		AS Numeric
 
-	//Otimizacao
-	If Empty(cTexto)
-		Return nPLin
-	EndIf
+	If Empty(cTexto)	;	Return nPLin	;	EndIf	//-- Otimizacao
 	
-	//Pula quando existe erro
-	If ::_lErro
-		Return 1
-	EndIf
+	If ::_lErro			;	Return nPLin	;	EndIf	//-- Pula quando existe erro
 
-	//Parametros da rotina-------------------------------------------------------------------------
-	ParamType 0	VAR nPLin  		AS Numeric
-	ParamType 1	VAR nPCol  		AS Numeric
-	ParamType 2	VAR cTexto  	AS Character
+	//-- Parâmetros da Rotina -------------------------------------------------
+	ParamObg 0	VAR nPLin
+	ParamObg 1	VAR nPCol
+	ParamObg 2	VAR cTexto
 	ParamType 3	VAR oFonte 		AS Object Class tFont,tFontEx
-	ParamType 4	VAR nLargura	AS Numeric
-	ParamType 5	VAR nTamLin		AS Numeric 		Optional DEFAULT ::CXTamLin(@oFonte) //Tamanho entre linhas
-	ParamType 6	VAR nPosFim		AS Numeric	 	Optional DEFAULT NIL //::nVP //Sem final pula pagina automaticamente
+	ParamObg 4	VAR nLargura
+	Default nTamLin	:= ::CXTamLin(@oFonte) //Tamanho entre linhas
 
-	//Inicializa variaveis-------------------------------------------------------------------------
-	aTexto	:= U_CXMemoLine(cTexto	,;	//01
-							Self	,;	//02
-							@oFonte	,;	//03
-							nLargura )	//04
+	//-- Inicializa Variáveis -------------------------------------------------
+	aTexto	:= U_CXMemoLine(cTexto	;	//01
+						,	Self	;	//02
+						,	@oFonte	;	//03
+						,	nLargura)	//04
 
-	//Remapeia coordenadas
-	::CXAjPos2(	@nPLin	,;	//01
-				@nPCol	,;	//02
-				@Self	 )	//03
+	//-- Remapeia Coordenadas -------------------------------------------------
+	::CXAjPos2(	@nPLin	;	//01
+			,	@nPCol	;	//02
+			,	@Self	)	//03
 
 	nLin	:= nPLin
 	nFimPag	:= ::nVP //tamanho horizontal
 
-	//---------------------------------------------------------------------------------------------
+	//-------------------------------------------------------------------------
 
 	For nX := 1 to len(aTexto)
 
@@ -1419,14 +1338,15 @@ Method SayJ ( 	nPLin	,;	// 01
 				Exit
 			EndIf
 		Else
-			//Quebra pagina?
-			nLin	:= Eval(::bQuebraPg,nLin)
+			nLin	:= Eval(::bQuebraPg,nLin)	//-- Quebra página?
 		EndIf
 
-		::Say(	nLin		,;	//01
-				nPCol 		,;	//02
-				aTexto[nX] 	,;	//03
-				@oFonte 	 )	//04
+		::Say(	nLin		;	//01
+			,	nPCol 		;	//02
+			,	aTexto[nX] 	;	//03
+			,	@oFonte 	;	//04
+			,/* nLargura */	;	//05
+			,	nClrText	)	//06
 
 /*		//Tentei ajustar usando o tamanho retornado pela funcao, mas as letras ficam espacadas demais
 		nPosH	:= nPCol
@@ -1457,31 +1377,38 @@ Return nLin
 //##|          |           |                                                |##
 //##+==========+===========+================================================+##
 //#############################################################################
-Method CXTamLin(oFonte	,;	// 01
-				nMult	;	// 02
-						) Class CXMSPrinter
+Method CXTamLin(oFonte	AS Object 	;	// 01
+			,	nMult	AS Numeric	;	// 02
+			)			AS Numeric Class CXMSPrinter
 
-	//Declaracao de variaveis----------------------------------------------------------------------
+	//-- Declaração de Variáveis ----------------------------------------------
+	Local cKey		AS Character
 	Local nIncLin	AS Numeric
 
-	//Pula quando existe erro
-	If ::_lErro
-		Return 1
-	EndIf
+	If ::_lErro		;		Return 1		;	EndIf	//-- Pula quando existe erro
 	
-	//Parametros da rotina-------------------------------------------------------------------------
+	//-- Parâmetros da Rotina -------------------------------------------------
 	ParamType 0	VAR oFonte 		AS Object Class tFont,tFontEx
-	ParamType 1	VAR nMult		AS Numeric 				Optional DEFAULT ::nMult
+	Default nMult	:= ::nMult
 
-	//---------------------------------------------------------------------------------------------
+	//-------------------------------------------------------------------------
+	cKey	:= 	Upper(AllTrim(oFonte:Name))+'|';
+			+	cValToChar(oFonte:nWidth)+'|';
+			+	cValToChar(oFonte:nHeight)+'|';
+			+	IIf(oFonte:Bold,'T','F')+'|';
+			+	IIf(oFonte:Italic,'T','F')
+	
+	If .Not. ::_jCacheFont:hasProperty(cKey)
+		//Seta a altura entre linhas
+		nIncLin	:= ::GetTextHeight("qMÃp",@oFonte)
 
-	//Seta a altura entre linhas
-	nIncLin	:= ::GetTextHeight("qMÃp",@oFonte) * nMult
+		//Ajuste de resolucao
+		nIncLin	:= ::ConvV(nIncLin)
+		
+		::_jCacheFont[cKey]	:= nIncLin
+	EndIf
 
-	//Ajuste de resolucao
-	nIncLin	:= ::ConvV(nIncLin)
-
-Return nIncLin
+Return ::_jCacheFont[cKey] * nMult
 
 //#############################################################################
 //##+==========+===============+=======+===============+======+=============+##
@@ -1510,16 +1437,18 @@ Return nIncLin
 //|                   [3][1] - Primeira coluna                  |
 //|            [...]                                            |
 //+-------------------------------------------------------------+
-Method CXBoxItens(	aItens	,;	//01
-					nVM		,;	//02
-					nHM		,;	//03
-					nLin	,;	//04
-					oFntCab	,;	//05
-					oFntItem,;	//06
-					nMult	;	//07
-							) Class CXMSPrinter
+Method CXBoxItens(	aItens		AS Array	;	//01
+				,	nVM			AS Numeric	;	//02
+				,	nHM			AS Numeric	;	//03
+				,	nLin		AS Numeric	;	//04
+				,	oFntCab		AS Object 	;	//05
+				,	oFntItem	AS Object 	;	//06
+				,	nMult		AS Numeric 	;	//07
+				,	oBrushTit	AS Object	;	//08
+				,	oBrushIt	AS Object	;	//09
+				)			AS Numeric Class CXMSPrinter
 
-	//Declaracao de variaveis----------------------------------------------------------------------
+	//-- Declaração de Variáveis ----------------------------------------------
 	Local nMgBoxCab		AS Numeric
 	Local nMgBoxItm		AS Numeric
 	Local nIncLinCab	AS Numeric
@@ -1530,26 +1459,20 @@ Method CXBoxItens(	aItens	,;	//01
 	Local nColIni		AS Numeric
 	Local nColFim		AS Numeric
 	
-	//Pula quando existe erro
-	If ::_lErro
-		Return 1
-	EndIf
+	If ::_lErro				;	Return 1		;	EndIf	//-- Pula quando existe erro
 
-	//Otimizacao
-	If Len(aItens) == 0
-		Return nLin
-	EndIf
+	If Len(aItens) == 0		;	Return nLin		;	EndIf	//-- Otimizacao
 
-	//Parametros da rotina-------------------------------------------------------------------------
-	ParamType 0	VAR aItens  	AS Array
-	ParamType 1	VAR nVM			AS Numeric			Optional DEFAULT ::nVM //Tamanho entre linhas
-	ParamType 2	VAR nHM		  	AS Numeric			Optional DEFAULT ::nHM //Tamanho entre linhas
-	ParamType 3	VAR nLin	 	AS Numeric
+	//-- Parâmetros da Rotina -------------------------------------------------
+	ParamObg 0	VAR aItens
+	Default nVM	:= ::nVM //Tamanho entre linhas
+	Default nHM	:= ::nHM //Tamanho entre linhas
+	ParamObg 3	VAR nLin
 	ParamType 4	VAR oFntCab		AS Object Class tFont,tFontEx
 	ParamType 5	VAR oFntItem	AS Object Class tFont,tFontEx
-	ParamType 6	VAR nMult		AS Numeric 			Optional DEFAULT ::nMult
+	Default nMult	:= ::nMult
 
-	//---------------------------------------------------------------------------------------------
+	//-------------------------------------------------------------------------
 	//Seta a altura entre linhas
 	nIncLinCab	:= ::CXTamLin(@oFntCab,nMult)
 	nMgBoxCab	:= nIncLinCab * 0.75
@@ -1582,16 +1505,24 @@ Method CXBoxItens(	aItens	,;	//01
 	nLin	:= Eval(::bQuebraPg,nLin)
 
 	If .Not. Empty(aItens[nPR_TITULO])
-		::SayC(	nLin+nMgBoxCab 						,;	//01
-				nHM+nMgBoxCab						,;	//02
-				aItens[nPR_TITULO]					,;	//03
-				@oFntCab							,;	//04
-				nColFim - nColIni - (2*nMgBoxCab) 	 )	//05
+		If oBrushTit <> NIL
+			::FillRect(	{ (nLin + 1) , (nHM + 1) , (nLin + nIncLinCab - 1) , (nColFim - 1) }	;
+					,	oBrushTit				;
+					)
+		EndIf
+
+		::SayC(	nLin+nMgBoxCab 						;	//01
+			,	nHM+nMgBoxCab						;	//02
+			,	aItens[nPR_TITULO]					;	//03
+			,	@oFntCab							;	//04
+			,	nColFim - nColIni - (2*nMgBoxCab) 	)	//05
 				
-		::Box( 	nLin				,;	//01
-				nHM					,;	//02
-				nLin + nIncLinCab 	,;	//03
-				nColFim 			 )	//04
+		::Box( 	nLin				;	//01
+			,	nHM					;	//02
+			,	nLin + nIncLinCab 	;	//03
+			,	nColFim 			;	//04
+			)
+		
 		nLin	+= nIncLinCab
 	EndIf
 
@@ -1599,14 +1530,16 @@ Method CXBoxItens(	aItens	,;	//01
 	//| Conteudos dos itens      |
 	//+--------------------------+
 	For nX := 1 to len(aItens[nPR_CAMPOS])
-		nLin	:= ::CXLinTxt(	nLin 					,;	//01
-								nColIni 				,;	//02
-								aItens[nPR_CAMPOS][nX] 	,;	//03
-								aItens[nPR_DESCRI]		,;	//04
-								nIncLinItm 				,;	//05
-								nMgBoxItm  				,;	//06
-								@oFntItem 				,;	//07
-								( nX == 1 ) 			)	//08 - Forca impressao do cabecalho?
+		nLin	:= ::CXLinTxt(	nLin 					;	//01
+							,	nColIni 				;	//02
+							,	aItens[nPR_CAMPOS][nX] 	;	//03
+							,	aItens[nPR_DESCRI]		;	//04
+							,	nIncLinItm 				;	//05
+							,	nMgBoxItm  				;	//06
+							,	@oFntItem 				;	//07
+							,	( nX == 1 ) 			;	//08 - Forca impressao do cabecalho?
+							,	oBrushIt				;	//09
+							)
 	Next
 
 Return nLin
@@ -1635,20 +1568,23 @@ Return nLin
 //|                   [2][...] - outras colunas se houver       |
 //|            [...]                                            |
 //+-------------------------------------------------------------+
-Method CXBoxTxt(aImp	,;  //01 Array para impressao
-				nVM		,;  //02 Margem vertical
-				nHM		,;	//03 Margem horizontal
-				nLin	,;	//04 Linha inicial para impressao
-				oFntCab	,;	//05 Fonte para impressao do cabecalho
-				oFntItem,;	//06 Fonte para impressao dos itens
-				nTab	,;	//07 Espacamento para impressao do titulo da coluna
-				nMult	,;	//08 Multiplicador para espacamento entre linhas
-				lBoxCab	,;	//09 Imprime o box no cabecalho
-				lBoxItem,;	//10 Imprime o box nos itens?
-				nAjuste	;	//11 Ajuste da largura de impressao do sayJ, devido as funcoes padrao nao calcularem isso direito
-						) Class CXMSPrinter
+Method CXBoxTxt(aImp		AS Array	;	//01 Array para impressao
+			,	nVM			AS Numeric	;	//02 Margem vertical
+			,	nHM			AS Numeric	;	//03 Margem horizontal
+			,	nLin		AS Numeric	;	//04 Linha inicial para impressao
+			,	oFntCab		AS Object 	;	//05 Fonte para impressao do cabecalho
+			,	oFntItem	AS Object 	;	//06 Fonte para impressao dos itens
+			,	nTab		AS Numeric	;	//07 Espacamento para impressao do titulo da coluna
+			,	nMult		AS Numeric	;	//08 Multiplicador para espacamento entre linhas
+			,	lBoxCab		AS Logical	;	//09 Imprime o box no cabecalho
+			,	lBoxItem	AS Logical	;	//10 Imprime o box nos itens?
+			,	nAjuste		AS Numeric	;	//11 Ajuste da largura de impressao do sayJ, devido as funcoes padrao nao calcularem isso direito
+			,	lRodape		AS Logical	;	//12 Impressão do rodapé, ignora limite de página
+			,	nClrText	AS Numeric	;	//13 Cor do texto (padrão 0 - preto)
+			,	oBrushTit	AS Object	;	//14 Objeto Brush para pintar o fundo do titulo
+			)			AS Numeric Class CXMSPrinter
 
-	//Declaracao de variaveis----------------------------------------------------------------------
+	//-- Declaração de Variáveis ----------------------------------------------
 	Local nMgBoxCab		AS Numeric
 	Local nMgBoxItm		AS Numeric
 	Local nIncLinCab	AS Numeric
@@ -1667,52 +1603,49 @@ Method CXBoxTxt(aImp	,;  //01 Array para impressao
 	Local nTabDet		AS Numeric
 	Local oFntItemN		AS Object
 
-	//Pula quando existe erro
-	If ::_lErro
-		Return 1
-	EndIf
+	If ::_lErro		;		Return 1		;	EndIf	//-- Pula quando existe erro
 	
-	//Otimizacao
-	If Len(aImp) == 0
-		Return nLin
-	EndIf
+	If Len(aImp) == 0	;	Return nLin		;	EndIf	//-- Otimizacao
 
-	//Parametros da rotina-------------------------------------------------------------------------
-	ParamType 0		VAR aImp		AS Array
-	ParamType 1		VAR nVM			AS Numeric 		Optional DEFAULT ::nVM
-	ParamType 2		VAR nHM		  	AS Numeric		Optional DEFAULT ::nHM
-	ParamType 3		VAR nLin 		AS Numeric
+	//-- Parâmetros da Rotina -------------------------------------------------
+	ParamObg 0		VAR aImp
+	Default nVM			:= ::nVM
+	Default nHM			:= ::nHM
+	ParamObg 3		VAR nLin
 	ParamType 4		VAR oFntCab		AS Object Class tFont,tFontEx
 	ParamType 5		VAR oFntItem	AS Object Class tFont,tFontEx
-	ParamType 6		VAR nTab		AS Numeric		Optional DEFAULT 050
-	ParamType 7		VAR nMult		AS Numeric		Optional DEFAULT ::nMult
-	ParamType 8		VAR lBoxCab    	AS Logical 		Optional DEFAULT .T.
-	ParamType 9		VAR lBoxItem  	AS Logical 		Optional DEFAULT .T.
-	ParamType 10	VAR nAjuste		AS Numeric		Optional DEFAULT 0
+	Default	nTab		:= 050
+	Default	nMult		:= ::nMult
+	Default	lBoxCab    	:= .T.
+	Default	lBoxItem  	:= .T.
+	Default	nAjuste		:= 0
+	Default lRodape		:= .F.
 
-	//Inicializa Variaveis-------------------------------------------------------------------------
-	//Fonte negrito para os itens
-	oFntItemN		:= tFont():New(	oFntItem:Name		,;	//01
-									oFntItem:nWidth		,;	//02
-									oFntItem:nHeight	,;	//03
-									/*uPar3*/			,;	//04
-									.T.					,;	//05 - Negrito
-									/*uPar5*/			,;	//06
-									/*uPar6*/			,;	//07
-									/*uPar7*/			,;	//08
-									/*uPar8*/			,;	//09
-									oFntItem:Underline	,;	//10
-									oFntItem:Italic		)	//11
+	//-- Inicializa Variáveis -------------------------------------------------
 
-	//Seta a altura entre linhas
+	//-- Fonte negrito para os itens ------------------------------------------
+	oFntItemN		:= tFont():New(	oFntItem:Name		;	//01
+								,	oFntItem:nWidth		;	//02
+								,	oFntItem:nHeight	;	//03
+								,	/*uPar3*/			;	//04
+								,	.T.					;	//05 - Negrito
+								,	/*uPar5*/			;	//06
+								,	/*uPar6*/			;	//07
+								,	/*uPar7*/			;	//08
+								,	/*uPar8*/			;	//09
+								,	oFntItem:Underline	;	//10
+								,	oFntItem:Italic		;	//11
+								)
+
+	//-- Seta a altura entre linhas
 	nIncLinCab	:= ::CXTamLin(@oFntCab,nMult)
-	nMgBoxCab	:= nIncLinCab * 0.80
+	nMgBoxCab	:= nIncLinCab * 0.75
 
 	nIncLinItm	:= ::CXTamLin(@oFntItem,nMult)
-	nMgBoxItm	:= nIncLinItm * 0.80
+	nMgBoxItm	:= nIncLinItm * 0.75
 	nTamPto		:= U_CXTamTxt('.',@oFntItemN,Self)
 
-	//---------------------------------------------------------------------------------------------
+	//-------------------------------------------------------------------------
 	For nX := 1 to len(aImp)
 		If len(aImp[nX]) == 1 //Apenas
 			If ValType(aImp[nX][1]) == 'C' //Apenas titulo?
@@ -1728,19 +1661,25 @@ Method CXBoxTxt(aImp	,;  //01 Array para impressao
 			.Not. Empty(aImp[nX][nIM_TITULO])
 
 			nLinIni	+= nIncLinCab
+			If oBrushTit <> NIL
+				::FillRect(	{ nLin , nHM , nLinIni , (::nHP - nHM) }	;
+						,	oBrushTit				;
+						)
+			EndIf
 			If lBoxCab
-				::Box( nLin, nHM, nLinIni , ::nHP-nHM )
+				::Box( nLin, nHM, nLinIni ,::nHP-nHM )
 			EndIf
 			nLin	+= nMgBoxCab
-			::SayC(	nLin 						,;	//01
-					nHM+nMgBoxCab				,;	//02
-					aImp[nX][nIM_TITULO]		,;	//03
-					@oFntCab					,;	//04
-					::nHP-( 2*(nHM+nMgBoxCab) )  )	//05
+			::SayC(	nLin 						;	//01
+				,	nHM+nMgBoxCab				;	//02
+				,	aImp[nX][nIM_TITULO]		;	//03
+				,	@oFntCab					;	//04
+				,	::nHP-( 2*(nHM+nMgBoxCab) ) )	//05
 			nLin	+= nIncLinCab
 		Else
 			nLin	+= nMgBoxCab
 		EndIf
+		If .Not. lRodape	;	nLin := Eval(::bQuebraPg,nLin)	;	EndIf	//-- Quebra pagina?
 
 		//+-------------------------+
 		//| Itens do Box            |
@@ -1783,7 +1722,13 @@ Method CXBoxTxt(aImp	,;  //01 Array para impressao
 						EndIf
 						aItens[nZ][nIC_TITULO]	+= ':'
 
-						::Say( nLin, nHM + nMgBoxCab + ( (nZ-1) * nTamCol ) ,aItens[nZ][nIC_TITULO],@oFntItemN)
+						::Say(	nLin					;
+					/*02*/	,	nHM + nMgBoxCab + ( (nZ-1) * nTamCol ) ;
+					/*03*/	,	aItens[nZ][nIC_TITULO]	;
+					/*04*/	,	oFntItemN				;
+					/*05*/	,/* nLargura */				;
+					/*06*/	,	nClrText				;
+							)
 						nTabDet	:= nTab
 					Else	//Sem titulo?
 						nTabDet	:= 0
@@ -1801,21 +1746,39 @@ Method CXBoxTxt(aImp	,;  //01 Array para impressao
 	//				If nTamTxt <= nEspTxt
 	//					::Say( nLin, nColIni ,aItens[nZ][nIC_CONTEU],@oFntItem,nEspTxt+nAjuste)
 	//				Else
-						nLinFim := ::SayJ( nLin, nColIni ,aItens[nZ][nIC_CONTEU],@oFntItem,nEspTxt+nAjuste,nIncLinItm,::nFV)
+						nLinFim := ::SayJ(	nLin			;	// 01
+								/*02*/	,	nColIni			;
+								/*03*/	,	aItens[nZ][nIC_CONTEU];
+								/*04*/	,	oFntItem		;
+								/*05*/	,	nEspTxt+nAjuste	;
+								/*06*/	,	nIncLinItm		;
+								/*07*/	,	::nFV			;
+								/*08*/	,	nClrText		;
+										)
 						If ( nLinFim - nLin ) >= nIncLinPro
 							nIncLinPro	:= ( nLinFim - nLin )
 						EndIf
 	//				EndIf
 				Next
 				nLin	+= nIncLinPro
+				If Eval(::bFimLinha,nLinFim)	//--- Quebra página?
+					If 	len(aImp[nX][nIM_CAMPOS]) > 0 .And. ;
+						lBoxItem	//-- Box dos itens
+						
+						::Box( nLinIni, nHM, nLin-nIncLinItm/2 , ::nHP-nHM )
+					EndIf
+
+					If .Not. lRodape	;	nLin := Eval(::bQuebraPg,nLin)	;	EndIf	//-- Quebra pagina?
+					nLinIni	:= nLin
+				EndIf
 			Next
 		EndIf
 
 		If len(aImp[nX][nIM_CAMPOS]) > 0
-			//O ultimo salto nao precisa ser uma linha inteira, basta meia linha
+			//-- O último salto não precisa ser uma linha inteira, basta meia linha
 			nLin	-= nIncLinItm/2
 
-			//Box dos itens
+			//-- Box dos itens
 			If lBoxItem
 				::Box( nLinIni, nHM, nLin , ::nHP-nHM )
 			EndIf
@@ -1843,33 +1806,26 @@ Return nLin
 //##|          |           |                                                |##
 //##+==========+===========+================================================+##
 //#############################################################################
-Method CXQuebraPag(	nLin		,;	// 01
-					lImpRodape	,;	// 02
-					nEspaco		,;	// 03
-					lForca		;	// 04
-								) Class CXMSPrinter
+Method CXQuebraPag(	nLin		AS Numeric	;	// 01
+				,	lImpRodape	AS Logical	;	// 02
+				,	nEspaco		AS Numeric	;	// 03
+				,	lForca		AS Logical	;	// 04
+				)				AS Numeric Class CXMSPrinter
 
-	//Declaracao de variaveis----------------------------------------------------------------------
-	Local uRet				AS Variant
-	Local lFinalPag			AS Logical
-	Local lPrimPag			AS Logical
+	//-- Declaração de Variáveis ----------------------------------------------
+	Local uRet										AS Variant
+	Local lFinalPag	:= .F.							AS Logical
+	Local lPrimPag	:= ( nLin == NIL )				AS Logical
 
-	//Pula quando existe erro
-	If ::_lErro
-		Return 1
-	EndIf
+	If ::_lErro		;		Return 1		;	EndIf	//-- Pula quando existe erro
 
-	//Parametros da rotina-------------------------------------------------------------------------
-	ParamType 0	VAR nLin		AS Numeric		Optional Default NIL
-	ParamType 1	VAR lImpRodape	AS Logical 		Optional DEFAULT .F.
-	ParamType 2	VAR nEspaco		AS Numeric		Optional DEFAULT 0
-	ParamType 3	VAR lForca		AS Logical 		Optional DEFAULT .F.	//Forca a quebra de pagina
+	//-- Parâmetros da Rotina -------------------------------------------------
+	//ParamType 0	VAR nLin		AS Numeric		Optional Default NIL
+	Default lImpRodape	:= .F.
+	Default nEspaco		:= 0
+	Default lForca		:= .F.	//Forca a quebra de pagina
 
-	//Inicializa variaveis-------------------------------------------------------------------------
-	lFinalPag	:= .F.
-	lPrimPag	:= ( nLin == NIL )
-
-	//---------------------------------------------------------------------------------------------
+	//-------------------------------------------------------------------------
 	If .Not. lPrimPag
 		lFinalPag	:= Eval(::bFimLinha	,;	//01
 							nLin+nEspaco )	//02
@@ -1902,6 +1858,7 @@ Method CXQuebraPag(	nLin		,;	// 01
 
 		//Inicia nova pagina
 		::StartPage()
+		nLin	:= ::nVM		//-- Inicializo a linha
 
 		//Imprime cabecalho da pagina
 		uRet	:= Eval(::bCabec,nLin,Self)
@@ -1927,19 +1884,15 @@ Return nLin
 //##|          |           |                                                |##
 //##+==========+===========+================================================+##
 //#############################################################################
-Method CXCabec(;
-				) Class CXMSPrinter
+Method CXCabec()	AS Numeric Class CXMSPrinter
 
-	//Declaracao de variaveis----------------------------------------------------------------------
-	Local nLin		AS Numeric
-	Local nIncLin	AS Numeric
+	//-- Declaração de Variáveis ----------------------------------------------
+	Local nLin		:= ::nVM						AS Numeric
+	Local nIncLin									AS Numeric
 
-	//Pula quando existe erro
-	If ::_lErro
-		Return 1
-	EndIf
+	If ::_lErro		;		Return 1		;	EndIf	//-- Pula quando existe erro
 
-	//---------------------------------------------------------------------------------------------
+	//-------------------------------------------------------------------------
 	If ::_oFonte11 == NIL
 		::_oFonte11  := tFont():New("Arial",,11,,.F.)
 		::_oFonte11N := tFont():New("Arial",,11,,.T.)
@@ -1948,8 +1901,7 @@ Method CXCabec(;
 		::_oFonte14N := tFont():New("Arial",,14,,.T.)
 	EndIf
 
-	//Inicializa variaveis-------------------------------------------------------------------------
-	nLin	:= ::nVM
+	//-- Inicializa Variáveis -------------------------------------------------
 	nIncLin	:= ::CXTamLin(@::_oFonte11,0.85)
 
 	//Erro padrao quando pdf via job a margem superior comeca em 20
@@ -1960,10 +1912,7 @@ Method CXCabec(;
 		EndIf
 	EndIf
 
-	//---------------------------------------------------------------------------------------------
-	//+----------------------------------+
-	//| Inicio da impressao do cabecalho |
-	//+----------------------------------+
+	//-- Inicio da impressao do cabecalho -------------------------------------
 
 	//Imprime logomarca
 	::SayBitmap( nLin , ::nHM, ::cLogo, 5 * nIncLin - 005, 5 * nIncLin - 005 )
@@ -2024,33 +1973,27 @@ Return nLin
 //##|          |           |                                                |##
 //##+==========+===========+================================================+##
 //#############################################################################
-Method CXRodape(aAss;	//01
-					) Class CXMSPrinter
+Method CXRodape(aAss	AS Array	);	//01
+						AS Numeric Class CXMSPrinter
 
-	//Declaracao de variaveis----------------------------------------------------------------------
-	Local nLinha		AS Numeric
-	Local nX			AS Integer
-	Local nCont			AS Numeric
+	//-- Declaração de Variáveis ----------------------------------------------
+	Local nLinha									AS Numeric
+	Local nX										AS Integer
+	Local nCont										AS Numeric
 
-	Local nLarAss		AS Numeric
-	Local nAltAss		AS Numeric
-	Local nAltTot		AS Numeric
-	Local nCol			AS Numeric
-	Local nQtdCol		AS Numeric
-	Local cBmpAss		AS Character
+	Local nLarAss									AS Numeric
+	Local nAltAss									AS Numeric
+	Local nAltTot									AS Numeric
+	Local nCol										AS Numeric
+	Local nQtdCol	:= ::nQtdCol					AS Numeric
+	Local cBmpAss									AS Character
 
-	//Pula quando existe erro
-	If ::_lErro
-		Return 1
-	EndIf
+	If ::_lErro		;		Return 1		;	EndIf	//-- Pula quando existe erro
 
-	//Parametros da rotina-------------------------------------------------------------------------
-	ParamType 0		VAR aAss		AS Array 		Optional DEFAULT {}
+	//-- Parâmetros da Rotina -------------------------------------------------
+	Default aAss := {}
 
-	//Inicializa Variaveis-------------------------------------------------------------------------
-
-	nQtdCol	:= ::nQtdCol
-
+	//-------------------------------------------------------------------------
 	If len(aAss) > 0
 		If ::GetOrientation() == nPD_PAISAGEM
 			nQtdCol	:= Round(nQtdCol*1.5,0)
@@ -2077,11 +2020,12 @@ Method CXRodape(aAss;	//01
 
 			//If U_CXFile(cBmpAss,!IsBlind()) //Existe o arquivo da assintura?
 			If U_CXFile(cBmpAss,.Not. ::_lConsole) //Existe o arquivo da assinatura?
-				::SayBitmap(nLinha	,;	//01
-							nCol	,;	//02
-							cBmpAss	,;	//03
-							nLarAss	,;	//04
-							nAltAss	 )	//05 Ver tb tx abaixo da assintaura
+				::SayBitmap(nLinha	;	//01
+						,	nCol	;	//02
+						,	cBmpAss	;	//03
+						,	nLarAss	;	//04
+						,	nAltAss	;	//05 Ver tb tx abaixo da assintaura
+						)
 				nCont++
 				nCol	+= nLarAss+::nEspAss
 				If nCont > nQtdCol
@@ -2116,98 +2060,103 @@ Return ::nFV
 //##|          |           |                                                |##
 //##+==========+===========+================================================+##
 //#############################################################################
-Method CXLinTxt(nPLin 		,;	// 01
-				nPCol 		,;	// 02
-				aLinha 		,;	// 03
-				aDesc 		,;	// 04
-				nIncLinItm 	,;	// 05
-				nMgBoxItm  	,;	// 06
-				oFntItem  	,;	// 07
-				lForcCab	;	// 08
-						) Class CXMSPrinter
+Method CXLinTxt(nPLin 		AS Numeric	;	// 01
+			,	nPCol 		AS Numeric	;	// 02
+			,	aLinha 		AS Array	;	// 03
+			,	aDesc 		AS Array	;	// 04
+			,	nIncLinItm 	AS Numeric	;	// 05
+			,	nMgBoxItm  	AS Numeric	;	// 06
+			,	oFntItem  	AS Object 	;	// 07
+			,	lForcCab	AS Logical	;	// 08
+			,	oBrush		AS Object 	;	// 09
+			,	lImpCab		AS Logical	;	// 10 Imprime o cabecalho (USO INTERNO)
+			)			AS Numeric Class CXMSPrinter
 
-	//Declaracao de variaveis----------------------------------------------------------------------
-	Local nLinFim			AS Numeric
-	Local aCabec			AS Array
-	Local nX,nY				AS Integer
-	Local lTestEsp			AS Logical
-	Local nDifLin			AS Numeric
-	Local nColIni			AS Numeric
-	Local nLinMax			AS Numeric
-	Local cTexto			AS Character
-	Local cAlinha			AS Character
-	Local oFntItemN			AS Object
+	//-- Declaração de Variáveis ----------------------------------------------
+	Local nLinFim									AS Numeric
+	Local aCabec	:= {}							AS Array
+	Local nX,nY										AS Integer
+	Local lTestEsp	:= .T.							AS Logical
+	Local nDifLin									AS Numeric
+	Local nColIni									AS Numeric
+	Local nLinMax									AS Numeric
+	Local cTexto									AS Character
+	Local cAlinha	:= 'E'							AS Character
+	Local oFntItemN									AS Object
 
-	//Pula quando existe erro
-	If ::_lErro
-		Return 1
-	EndIf
+	If ::_lErro		;		Return 1		;	EndIf	//-- Pula quando existe erro
 
-	//Parametros da rotina-------------------------------------------------------------------------
-	ParamType 0	VAR nPLin		AS Numeric
-	ParamType 1	VAR nPCol		AS Numeric
-	ParamType 2	VAR aLinha  	AS Array
-	ParamType 3	VAR aDesc 		AS Array
-	ParamType 4	VAR nIncLinItm	AS Numeric
-	ParamType 5	VAR nMgBoxItm	AS Numeric
+	//-- Parâmetros da Rotina -------------------------------------------------
+	ParamObg 0	VAR nPLin
+	ParamObg 1	VAR nPCol
+	ParamObg 2	VAR aLinha
+	ParamObg 3	VAR aDesc
+	ParamObg 4	VAR nIncLinItm
+	ParamObg 5	VAR nMgBoxItm
 	ParamType 6	VAR oFntItem	AS Object Class tFont,tFontEx
-	ParamType 7	VAR lForcCab	AS Logical				Optional DEFAULT .F.
+	Default lForcCab	:= .F.
+	Default lImpCab		:= .F.	//-- Impressão do cabeçalho
 
-	//Inicializa Variaveis-------------------------------------------------------------------------
-	aCabec		:= {}
-	cAlinha		:= 'E'
-	lTestEsp	:= .T.
-
-	//Remapeia coordenadas
-	::CXAjPos2(	@nPLin	,;	//01
-				@nPCol	,;	//02
-				@Self	 )	//03
+	//-- Remapeia Coordenadas -------------------------------------------------
+	::CXAjPos2(	@nPLin	;	//01
+			,	@nPCol	;	//02
+			,	@Self	)	//03
 
 	nLinFim		:= nPLin
 	
-	//---------------------------------------------------------------------------------------------
+	//-------------------------------------------------------------------------
 	For nX := 1 to 2
 		nColIni	:= nPCol
 		For nY := 1 to len(aLinha)
-
 	 		cTexto	:= AllTrim(aLinha[nY])
 			If .Not. lTestEsp
-				//Esquerda
-				If len(aDesc[nY]) < nPD_ALINHA .Or. ;
-					aDesc[nY][nPD_ALINHA] $ 'E/L'
+				If len(aDesc[nY]) < nPD_ALINHA .Or. ;		//-- Esquerda
+					aDesc[nY][nPD_ALINHA] $ 'E/L' .Or. ;
+					( lImpCab .And. aDesc[nY][nPD_ALINHA] $ 'D/R' )	//-- Não usa impressão a direita no cabeçalho
 		//			::Say(nPLin  + nMgBoxItm , nColIni + nMgBoxItm/2 , cTexto,@oFntItemN)
 					cAlinha	:= 'E'
-				//Centralizado
-				ElseIf aDesc[nY][nPD_ALINHA] == 'C'
+				ElseIf aDesc[nY][nPD_ALINHA] == 'C'			//-- Centralizado
 		//			::SayC(nPLin  + nMgBoxItm , nColIni, cTexto,@oFntItemN,aDesc[nY][nPD_TAMANH])
 					cAlinha	:= 'C'
-				//Direira
-				ElseIf aDesc[nY][nPD_ALINHA] $ 'D/R'
+				ElseIf aDesc[nY][nPD_ALINHA] $ 'D/R'		//-- Direira
 		//			::SayR(nPLin  + nMgBoxItm , nColIni + aDesc[nY][nPD_TAMANH] - nMgBoxItm , cTexto,@oFntItemN)
 					cAlinha	:= 'D'
 				EndIf
 			EndIF
 
-			nLinMax	:= ::CXTxtBx(	nPLin					,;	//01
-									nColIni					,;	//02
-									cTexto 					,;	//03
-									@oFntItem				,;	//04
-									aDesc[nY][nPD_TAMANH] 	,;	//05
-									nIncLinItm				,;	//06
-									nMgBoxItm 				,;	//07
-									/*nPosFim*/ 			,;	//08
-									cAlinha					,;	//09
-									lTestEsp 				) 	//10
+			If .Not. lTestEsp
+				If 	oBrush <> NIL .And. ;
+					lImpCab
 
+					::FillRect({	nPLin				;	//-- aCoord
+								,	nColIni				;
+								,	nLinFim 			;
+								,	nColIni + aDesc[nY][nPD_TAMANH] ;
+								}						;
+							,	oBrush					;
+							)
+				EndIf
+				::Box(	nPLin 							;	//01
+					,	nColIni							;	//02
+					,	nLinFim 						;	//03
+					,	nColIni + aDesc[nY][nPD_TAMANH] )	//04
+			EndIf
+
+			nLinMax	:= ::CXTxtBx(	nPLin					;	//01
+								,	nColIni					;	//02
+								,	cTexto 					;	//03
+								,	@oFntItem				;	//04
+								,	aDesc[nY][nPD_TAMANH] 	;	//05
+								,	nIncLinItm				;	//06
+								,	nMgBoxItm 				;	//07
+								,	/*nPosFim*/ 			;	//08
+								,	cAlinha					;	//09
+								,	lTestEsp 				; 	//10
+								)
 			If lTestEsp
 				If nLinMax > nLinFim
 					nLinFim	:= nLinMax
 				EndIf
-			Else
-				::Box(	nPLin 							,;	//01
-						nColIni							,;	//02
-						nLinFim 						,;	//03
-						nColIni + aDesc[nY][nPD_TAMANH]  )	//04
 			EndIf
 
 			nColIni	+= aDesc[nY][nPD_TAMANH]
@@ -2216,25 +2165,27 @@ Method CXLinTxt(nPLin 		,;	// 01
 		If lTestEsp
 			nDifLin	:= (nLinFim - nPLin)
 
-			//Quebra pagina?
-			If Eval(::bFimLinha,nLinFim)
+			If Eval(::bFimLinha,nLinFim)	//--- Quebra página?
 				nPLin	:= Eval(::bQuebraPg,nLinFim)
 				lForcCab	:= .T.
 			EndIf
 
 			//Imprime cabecalho
-			If lForcCab
-				oFntItemN	:= tFont():New(	oFntItem:Name		,;	//01
-											oFntItem:nWidth		,;	//02
-											oFntItem:nHeight	,;	//03
-											/*uPar4*/			,;	//04
-											.T.					,;	//05
-											/*uPar6*/			,;	//06
-											/*uPar7*/			,;	//07
-											/*uPar8*/			,;	//08
-											/*uPar9*/			,;	//09
-											oFntItem:Underline	,;	//10
-											oFntItem:Italic		) 	//11
+			If 	lForcCab //.And. ;
+				//.Not. lImpCab		//-- Controle para não entrar em Loop, deixei sem tratar porque pode ser um erro na função do cabeçalho que deveria retornar a linha inicial
+
+				oFntItemN	:= tFont():New(	oFntItem:Name		;	//01
+										,	oFntItem:nWidth		;	//02
+										,	oFntItem:nHeight	;	//03
+										,	/*uPar4*/			;	//04
+										,	.T.					;	//05
+										,	/*uPar6*/			;	//06
+										,	/*uPar7*/			;	//07
+										,	/*uPar8*/			;	//08
+										,	/*uPar9*/			;	//09
+										,	oFntItem:Underline	;	//10
+										,	oFntItem:Italic		; 	//11
+										)
 
 				For nY := 1 to len(aDesc)
 					aAdd(aCabec,aDesc[nY][nPD_TITULO])
@@ -2243,14 +2194,17 @@ Method CXLinTxt(nPLin 		,;	// 01
 				//+--------------------------+
 				//| Descricoes dos itens     |
 				//+--------------------------+
-				nPLin	:= ::CXLinTxt(	nPLin 		,;	//01
-										nPCol 		,;	//02
-										aCabec 		,;	//03
-										aDesc   	,;	//04
-										nIncLinItm 	,;	//05
-										nMgBoxItm  	,;	//06
-										@oFntItemN 	) 	//07
-
+				nPLin	:= ::CXLinTxt(	nPLin 		;	//01
+									,	nPCol 		;	//02
+									,	aCabec 		;	//03
+									,	aDesc   	;	//04
+									,	nIncLinItm 	;	//05
+									,	nMgBoxItm  	;	//06
+									,	@oFntItemN 	; 	//07
+									,				;	//08
+									,	oBrush		;	//09
+									,	.T.			;	//10 Impressao do cabeçalho!
+									)
 			EndIf
 
 			nLinFim	:= nPLin + nDifLin
@@ -2277,66 +2231,57 @@ Return nLinFim
 //##|          |           |                                                |##
 //##+==========+===========+================================================+##
 //#############################################################################
-Method CXTxtBx(	nPLin		,;	//01
-				nPCol		,;	//02
-				cTexto		,;	//03
-				oFonte		,;	//04
-				nLargura	,;	//05
-				nTamLin		,;	//06
-				nMgBoxItm	,;	//07
-				nPosFim  	,;	//08
-				cAlinha		,;	//09
-				lTestEsp	;	//10
-							) Class CXMSPrinter
+Method CXTxtBx(	nPLin		AS Numeric	;	//01
+			,	nPCol		AS Numeric	;	//02
+			,	cTexto		AS Character;	//03
+			,	oFonte		AS Object	;	//04
+			,	nLargura	AS Numeric	;	//05
+			,	nTamLin		AS Numeric	;	//06
+			,	nMgBoxItm	AS Numeric	;	//07
+			,	nPosFim  	AS Numeric	;	//08
+			,	cAlinha		AS Character;	//09
+			,	lTestEsp	AS Logical	;	//10
+			)				AS Numeric Class CXMSPrinter
 
-	//Declaracao de variaveis----------------------------------------------------------------------
-	Local aTexto		AS Array
-	Local nLin			AS Numeric
-	Local nFimPag		AS Numeric
-	Local nX			AS Integer
+	//-- Declaração de Variáveis ----------------------------------------------
+	Local aTexto									AS Array
+	Local nLin										AS Numeric
+	Local nFimPag	:= ::nVP						AS Numeric
+	Local nX										AS Integer
 
-	//Pula quando existe erro
-	If ::_lErro
-		Return 1
-	EndIf
+	If ::_lErro		;		Return 1		;	EndIf	//-- Pula quando existe erro
 	
-	//Otimizacao
-	If Empty(cTexto)
-		Return nPLin
-	EndIf
+	If Empty(cTexto)	;	Return nPLin	;	EndIf	//-- Otimizacao
 
-	//Parametros da rotina-------------------------------------------------------------------------
-	ParamType 0	VAR nPLin		AS Numeric
-	ParamType 1	VAR nPCol		AS Numeric
-	ParamType 2	VAR cTexto  	AS Character
+	//-- Parâmetros da Rotina -------------------------------------------------
+	ParamObg 0	VAR nPLin
+	ParamObg 1	VAR nPCol
+	ParamObg 2	VAR cTexto
 	ParamType 3	VAR oFonte 		AS Object Class tFont,tFontEx
-	ParamType 4	VAR nLargura	AS Numeric			Optional Default ::nLP
-	ParamType 5	VAR nTamLin		AS Numeric			Optional Default ::CXTamLin(@oFonte) //Tamanho entre linhas
-	ParamType 6	VAR nMgBoxItm	AS Numeric
-	ParamType 7	VAR nPosFim		AS Numeric			Optional Default ::nVP //tamanho horizontal
-	ParamType 8	VAR cAlinha		AS Character		Optional Default 'L'
-	ParamType 9	VAR lTestEsp	AS Logical			Optional Default .F.
+	Default nLargura	:= ::nLP
+	Default nTamLin		:= ::CXTamLin(@oFonte) //Tamanho entre linhas
+	ParamObg 6	VAR nMgBoxItm
+	Default nPosFim		:= ::nVP //tamanho horizontal
+	Default cAlinha		:= 'L'
+	Default lTestEsp	:= .F.
 
-	//---------------------------------------------------------------------------------------------
-	
-	//Remapeia coordenadas
+	//-- Remapeia Coordenadas -------------------------------------------------
 	::CXAjPos2(@nPLin,@nPCol,@Self)
 
-	//Inicializa Variaveis-------------------------------------------------------------------------
-	nFimPag		:= ::nVP //tamanho horizontal
-
+	//-- Inicializa Variáveis -------------------------------------------------
 	nLin		:= nPLin
 	nLargura	-= nMgBoxItm
-	aTexto		:= U_CXMemoLine(cTexto	,;	//01
-								@Self	,;	//02
-								@oFonte	,;	//03
-								nLargura )	//04
+	aTexto		:= U_CXMemoLine(cTexto	;	//01
+							,	@Self	;	//02
+							,	@oFonte	;	//03
+							,	nLargura;	//04
+							)
 
 	//Apenas testa o espaco final da impressao para a quebra de pagina
 	If lTestEsp
 		nLin	+= ( len(aTexto) * nTamLin )
 
-	//Faz a impressao ate' o limite do espaco disponivel
+	//-- Faz a impressão até o limite do espaço disponível
 	Else
 		nPCol	+= ( nMgBoxItm/2 )
 		For nX := 1 to len(aTexto)
@@ -2351,23 +2296,26 @@ Method CXTxtBx(	nPLin		,;	//01
 
 			//Esquerda
 			If cAlinha $ 'E/L'
-				::Say(	nLin+nMgBoxItm		,;	//01
-						nPCol				,;	//02
-						RTrim(aTexto[nX])	,;	//03
-						@oFonte				 )	//04
+				::Say(	nLin+nMgBoxItm		;	//01
+					,	nPCol				;	//02
+					,	RTrim(aTexto[nX])	;	//03
+					,	@oFonte				;	//04
+					)
 			//Centralizado
 			ElseIf cAlinha == 'C'
-				::SayC(	nLin+nMgBoxItm		,;	//01
-						nPCol				,;	//02
-						AllTrim(aTexto[nX])	,;	//03
-						@oFonte				,;	//04
-						nLargura			 )	//05
+				::SayC(	nLin+nMgBoxItm		;	//01
+					,	nPCol				;	//02
+					,	AllTrim(aTexto[nX])	;	//03
+					,	@oFonte				;	//04
+					,	nLargura			;	//05
+					)
 			//Direira
 			ElseIf cAlinha $ 'D/R'
-				::SayR(	nLin+nMgBoxItm		,;	//01
-						nPCol+nLargura		,;	//02
-						AllTrim(aTexto[nX])	,;	//03
-						@oFonte				 )	//04
+				::SayR(	nLin+nMgBoxItm		;	//01
+					,	nPCol+nLargura		;	//02
+					,	AllTrim(aTexto[nX])	;	//03
+					,	@oFonte				;	//04
+					)
 			EndIf
 
 //			::Say (nLin, nPCol, aTexto[nX] , @oFonte)
@@ -2394,26 +2342,20 @@ Return nLin
 //##|          |           |                                                |##
 //##+==========+===========+================================================+##
 //#############################################################################
-Method SetResolution(	nResolucao 	,;	//01
-						uParam1		,;	//02
-						uParam2		,;	//03
-						uParam3		,;	//04
-						uParam4		,;	//05
-						uParam5 	;	//06
+Method SetResolution(	nResolucao 	AS Numeric	;	//01
+					,	uParam1		AS Variant	;	//02
+					,	uParam2		AS Variant	;	//03
+					,	uParam3		AS Variant	;	//04
+					,	uParam4		AS Variant	;	//05
+					,	uParam5 	AS Variant	;	//06
 									) Class CXMSPrinter
 
-	//Declaracao de variaveis----------------------------------------------------------------------
+	//-- Declaração de Variáveis ----------------------------------------------
 	Local uRet			AS Variant		//AS Character,Numeric,Date,Array,Logical,Object,Block
 
-	//Pula quando existe erro
-	If ::_lErro
-		Return NIL
-	EndIf
+	If ::_lErro		;		Return 1		;	EndIf	//-- Pula quando existe erro
 
-	//Parametros da rotina-------------------------------------------------------------------------
-	ParamType 0	VAR nResolucao	AS Numeric		Optional Default NIL
-	
-	//---------------------------------------------------------------------------------------------
+	//-------------------------------------------------------------------------
 	::nResolution	:= nResolucao
 
 	uRet	:= _Super:SetResolution(nResolucao	,;	//01
@@ -2440,24 +2382,15 @@ Return uRet
 //##|          |           |                                                |##
 //##+==========+===========+================================================+##
 //#############################################################################
-Method ConvH( nPosicao ;	//01
-						) Class CXMSPrinter
+Method ConvH( nPosicao AS Numeric	);	//01
+						AS Numeric Class CXMSPrinter
 
-	//Parametros da rotina-------------------------------------------------------------------------
-	ParamType 0	VAR nPosicao	AS Numeric
+	//-- Parâmetros da Rotina -------------------------------------------------
+	ParamObg 0	VAR nPosicao
 
-	//---------------------------------------------------------------------------------------------
+	If ::_lErro		;		Return 1		;	EndIf	//-- Pula quando existe erro
 
-	//Pula quando existe erro
-	If ::_lErro
-		Return 1
-	EndIf
-
-	//---------------------------------------------------------------------------------------------
-
-	If .Not. ::lAdjustToLegacy
-		nPosicao /= ::nFactorHor
-	EndIf
+	If .Not. ::lAdjustToLegacy		;	nPosicao /= ::nFactorHor		;	EndIf
 
 Return nPosicao
 
@@ -2476,24 +2409,12 @@ Return nPosicao
 //##|          |           |                                                |##
 //##+==========+===========+================================================+##
 //#############################################################################
-Method ConvV( nPosicao ;	//01
-						) Class CXMSPrinter
+Method ConvV( nPosicao AS Numeric);	//01
+						AS Numeric Class CXMSPrinter
 
-	//Parametros da rotina-------------------------------------------------------------------------
-	ParamType 0	VAR nPosicao	AS Numeric
+	If ::_lErro		;		Return 1		;	EndIf	//-- Pula quando existe erro
 
-	//---------------------------------------------------------------------------------------------
-
-	//Pula quando existe erro
-	If ::_lErro
-		Return 1
-	EndIf
-
-	//---------------------------------------------------------------------------------------------
-
-	If .Not. ::lAdjustToLegacy
-		nPosicao /= ::nFactorVert
-	EndIf
+	If .Not. ::lAdjustToLegacy		;	nPosicao /= ::nFactorVert		;	EndIf
 
 Return nPosicao
 
@@ -2512,23 +2433,19 @@ Return nPosicao
 //##|          |           |                                                |##
 //##+==========+===========+================================================+##
 //#############################################################################
-Method GetTextWidth(cTexto	,;	// 01
- 					oFonte 	;	// 02
-							) Class CXMSPrinter
+Method GetTextWidth(cTexto	AS Character;	// 01
+ 				,	oFonte 	AS Object	;	// 02
+				)			AS Numeric Class CXMSPrinter
 
-	//Parametros da rotina-------------------------------------------------------------------------
-	ParamType 0	VAR cTexto		AS Character
-	ParamType 1	VAR oFonte		AS Object
+	//-- Parâmetros da Rotina -------------------------------------------------
+	ParamObg 0	VAR cTexto
+	ParamObg 1	VAR oFonte
 
-	//---------------------------------------------------------------------------------------------
+	If ::_lErro		;		Return 1		;	EndIf	//-- Pula quando existe erro
 
-	//Pula quando existe erro
-	If ::_lErro
-		Return 1
-	EndIf
-
-Return U_FWTamFon(	cTexto	,;	//01
-					@oFonte	 )	//02
+Return U_FWTamFon(	cTexto	;	//01
+				,	@oFonte	;	//02
+				)
 
 //#############################################################################
 //##+==========+=============+=======+=================+======+=============+##
@@ -2544,13 +2461,14 @@ Return U_FWTamFon(	cTexto	,;	//01
 //##|          |           |                                                |##
 //##+==========+===========+================================================+##
 //#############################################################################
-Method CXAreaImp(;
-				) Class CXMSPrinter
+				  
+Method CXAreaImp() Class CXMSPrinter
 
-	//Pula quando existe erro
-	If ::_lErro
-		Return 1
-	EndIf
+	If ::_lErro		;		Return 1		;	EndIf	//-- Pula quando existe erro
+
+	//Margens da pagina
+	::nHM		:= ::ConvH(::nHM)
+	::nVM		:= ::ConvV(::nVM)
 
 	//Margens da pagina
 	::nFH	:= (::nHP - ::nHM) //Coordenada final horizontal
@@ -2610,10 +2528,10 @@ Return
 //##|          |           |                                                |##
 //##+==========+===========+================================================+##
 //#############################################################################
-Method CXImpGrid(nEspacos;	//01
-						) Class CXMSPrinter
+Method CXImpGrid(nEspacos	AS Numeric);	//01
+						Class CXMSPrinter
 
-	//Declaracao de variaveis----------------------------------------------------------------------
+	//-- Declaração de Variáveis ----------------------------------------------
 	Local nX			AS Integer
 	Local oFonte07		AS Object
 	Local oFonte10		AS Object
@@ -2622,26 +2540,23 @@ Method CXImpGrid(nEspacos;	//01
 	Local cTamPaper		AS Character
 	Local nIncLin		AS Numeric
 
-	//Pula quando existe erro----------------------------------------------------------------------
-	If ::_lErro
-		Return NIL
-	EndIf
+	If ::_lErro		;		Return NIL		;	EndIf	//-- Pula quando existe erro
 
-	//Parametros da rotina-------------------------------------------------------------------------
-	ParamType 0		VAR nEspacos  	  		AS Numeric			Optional Default 20
+	//-- Parâmetros da Rotina -------------------------------------------------
+	Default nEspacos	:= 20
 
-	//Inicializa Variaveis-------------------------------------------------------------------------
+	//-- Inicializa Variáveis -------------------------------------------------
 	oFonte07	:= tFont():New("Arial",07,07,,.T.)
 	oFonte10	:= tFont():New("Arial",10,10,,.T.)
 	nIncLin		:= ::CXTamLin(oFonte10,0.8)
 
-	//Linhas verticais-----------------------------------------------------------------------------
+	//-- Linhas verticais -----------------------------------------------------
 	For nX := nEspacos to ::nHP step nEspacos
 		::CXLine(000,nX,::nVP,nX,CLR_CYAN,/*cPixel*/,/*nLineType*/) //Linha
 		::Say(040,nX+01,StrZero(nX,4), @oFonte07,,CLR_CYAN )
 	Next
 
-	//Linhas horizontais---------------------------------------------------------------------------
+	//-- Linhas horizontais ---------------------------------------------------
 	For nX := nEspacos to ::nVP step nEspacos
 		::CXLine(nX,000,nX,::nHP,CLR_CYAN,/*cPixel*/,/*nLineType*/) //Linha
 		If nX <> nEspacos //O primeiro nao precisa e' compartilhado com as duas coordenadas
@@ -2649,7 +2564,7 @@ Method CXImpGrid(nEspacos;	//01
 		EndIf
 	Next
 
-	//Tamanhos da pagina---------------------------------------------------------------------------
+	//-- Tamanhos da página ---------------------------------------------------
  	//     linha          coluna final              texto                        fonte
  	::SayR(::nVP-(nIncLin*2),::nHP, "nHP = "+Transform(::nHP,"@E 9,999.99") , @oFonte10 ,CLR_HRED )	//Tamanho horizontal da pagina (sem margens)
  	::CXLine(000,::nHP,::nVP,::nHP,CLR_HRED,/*cPixel*/,/*nLineType*/) //Linha
@@ -2704,28 +2619,20 @@ Return
 //##|          |           |                                                |##
 //##+==========+===========+================================================+##
 //#############################################################################
-Method Preview(	cPrinter,;	//01
-				uParam1	,;	//02
-				uParam2	,;	//03
-				uParam3	,;	//04
-				uParam4	,;	//05
-				uParam5	;	//06
-						) Class CXMSPrinter
+Method Preview(	cPrinter	AS Character;	//01
+			,	uParam1		AS Variant	;	//02
+			,	uParam2		AS Variant	;	//03
+			,	uParam3		AS Variant	;	//04
+			,	uParam4		AS Variant	;	//05
+			,	uParam5		AS Variant	;	//06
+			) Class CXMSPrinter
 
-	//Declaracao de variaveis----------------------------------------------------------------------
+	//-- Declaração de Variáveis ----------------------------------------------
 	Local uRet			AS Variant		//AS Character,Numeric,Date,Array,Logical,Object,Block
 	Local cDrive		AS Character
 	Local bImprime		AS CodeBlock
 
-	//Pula quando existe erro
-	If ::_lErro
-		Return NIL
-	EndIf
-
-	//Parametros da rotina-------------------------------------------------------------------------
-	ParamType  0	VAR cPrinter	  	AS Character				Default NIL
-
-	//Inicializa Variaveis-------------------------------------------------------------------------
+	If ::_lErro		;		Return NIL		;	EndIf	//-- Pula quando existe erro
 
 	//Variaveis compartilhadas de mensagens de erro
 	cMsgErr		:= IIf(Type('cMsgErr')<>'C','',cMsgErr)
@@ -2733,7 +2640,7 @@ Method Preview(	cPrinter,;	//01
 	cSoluc		:= IIf(Type('cSoluc')<>'C','',cSoluc)
 	cMsg		:= IIf(Type('cMsg')<>'C','',cMsg)
 
-	//---------------------------------------------------------------------------------------------
+	//-------------------------------------------------------------------------
 	If ::nDevice == IMP_PDF
 
 		SplitPath( ::cPathPDF+'Teste.pdf', @cDrive, /*@cPDFDir*/, /*@cArqPDF*/,/*cExtensao*/)
@@ -2749,6 +2656,13 @@ Method Preview(	cPrinter,;	//01
 				::_lErro	:= .T.
 
 				::cPathPDF	:= cPathDest
+			ElseIf PrinterVersion():fromServer() == '0.0.0'
+				U_CXMsgErro('Impressão no servidor, arquivo PRINTER.EXE não está presente no '+;
+							'diretório do servidor (APPSERVER).',;
+							'INFORME O SETOR DE T.I.',.Not. ::_lConsole,/*oArea*/,,self)
+
+				lErro		:= .T.	//Variavel de controle de erros
+				::_lErro	:= .T.
 			EndIf
 		Else
 			If Empty(cDrive) //Path no servidor
@@ -2761,29 +2675,39 @@ Method Preview(	cPrinter,;	//01
 				::_lErro	:= .T.
 
 				::cPathPDF	:= GetTempPath() //Se for cliente gera no diretorio temporario
+			ElseIf PrinterVersion():fromClient() == '0.0.0'
+				U_CXMsgErro('Impressão no cliente, arquivo PRINTER.EXE não está presente no '+;
+							'diretório do cliente (Web Agent).',;
+							'INFORME O SETOR DE T.I.',.Not. ::_lConsole,/*oArea*/,,self)
+
+				lErro		:= .T.	//Variavel de controle de erros
+				::_lErro	:= .T.
 			EndIf
 		EndIf
 	EndIf
 
-	//Chama metodo da classe pai (FWMSPrinter)
-	bImprime	:= {|| ::CXImprimir(cPrinter,;	//01
-									uParam1	,;	//02
-									uParam2	,;	//03
-									uParam3	,;	//04
-									uParam4	,;	//05
-									uParam5	)}	//06
- 	If 	::_lConsole .Or. ;
-		::lInJob .Or. ;
-		FWIsInCallStack('FWMSGRUN') .Or. ;
-		FWIsInCallStack('MSGRUN') .Or. ;
-		FWIsInCallStack('PROCESSA') .Or. ;
-		FWIsInCallStack('MSAGUARDE')
+	If .Not. ::_lErro
+		//Chama metodo da classe pai (FWMSPrinter)
+		bImprime	:= {|| ::CXImprimir(cPrinter;	//01
+									,	uParam1	;	//02
+									,	uParam2	;	//03
+									,	uParam3	;	//04
+									,	uParam4	;	//05
+									,	uParam5	;	//06
+									)}
+		If 	::_lConsole .Or. ;
+			::lInJob .Or. ;
+			FWIsInCallStack('FWMSGRUN') .Or. ;
+			FWIsInCallStack('MSGRUN') .Or. ;
+			FWIsInCallStack('PROCESSA') .Or. ;
+			FWIsInCallStack('MSAGUARDE')
 
-		Eval(bImprime)
-	Else
-		FWMsgRun(/*oSay*/,bImprime,U_CXTxtMsg()+::cTitulo,'Aguarde...')
+			Eval(bImprime)
+		Else
+			FWMsgRun(/*oSay*/,bImprime,U_CXTxtMsg()+::cTitulo,'Aguarde...')
+		EndIf
 	EndIf
-
+	
 Return uRet
 
 //#############################################################################
@@ -2799,24 +2723,25 @@ Return uRet
 //##|          |           |                                                |##
 //##+==========+===========+================================================+##
 //#############################################################################
-Method CXImprimir(	cPrinter,;	//01
-					uParam1	,;	//02
-					uParam2	,;	//03
-					uParam3	,;	//04
-					uParam4	,;	//05
-					uParam5	;	//06
-						) Class CXMSPrinter
+Method CXImprimir(	cPrinter	AS Character;	//01
+				,	uParam1		AS Variant	;	//02
+				,	uParam2		AS Variant	;	//03
+				,	uParam3		AS Variant	;	//04
+				,	uParam4		AS Variant	;	//05
+				,	uParam5		AS Variant	;	//06
+				) Class CXMSPrinter
 	
-	//Declaração de Variáveis----------------------------------------------------------------------
+	//-- Declaração de Variáveis ----------------------------------------------
 	Local uRet			AS Variant
 
-	//---------------------------------------------------------------------------------------------
-	uRet	:=	_Super:Preview(	cPrinter,;	//01
-								uParam1	,;	//02
-								uParam2	,;	//03
-								uParam3	,;	//04
-								uParam4	,;	//05
-								uParam5	)	//06
+	//-------------------------------------------------------------------------
+	uRet	:=	_Super:Preview(	cPrinter;	//01
+							,	uParam1	;	//02
+							,	uParam2	;	//03
+							,	uParam3	;	//04
+							,	uParam4	;	//05
+							,	uParam5	;	//06
+							)
 
 	::CXLimpaTmp() //Limpa arquivos temporarios .REL e aguarda final da impressao
 
@@ -2837,28 +2762,23 @@ Return uRet
 //##|          |           |                                                |##
 //##+==========+===========+================================================+##
 //#############################################################################
-Method Print(	cPrinter,;	//01
-				uParam1	,;	//02
-				uParam2	,;	//03
-				uParam3	,;	//04
-				uParam4	,;	//05
-				uParam5	;	//06
-						) Class CXMSPrinter
+Method Print(	cPrinter	AS Character;	//01
+			,	uParam1		AS Variant	;	//02
+			,	uParam2		AS Variant	;	//03
+			,	uParam3		AS Variant	;	//04
+			,	uParam4		AS Variant	;	//05
+			,	uParam5		AS Variant	;	//06
+			) Class CXMSPrinter
 
-	//Parametros da rotina-------------------------------------------------------------------------
-	ParamType  0	VAR cPrinter	  	AS Character				Default NIL
+	If ::_lErro		;		Return NIL		;	EndIf	//-- Pula quando existe erro
 
-	//Pula quando existe erro----------------------------------------------------------------------
-	If ::_lErro
-		Return NIL
-	EndIf
-
-Return ::Preview(	cPrinter,;	//01
-					uParam1	,;	//02
-					uParam2	,;	//03
-					uParam3	,;	//04
-					uParam4	,;	//05
-					uParam5	) 	//06
+Return ::Preview(	cPrinter;	//01
+				,	uParam1	;	//02
+				,	uParam2	;	//03
+				,	uParam3	;	//04
+				,	uParam4	;	//05
+				,	uParam5	; 	//06
+				)
 
 //#############################################################################
 //##+==========+=============+=======+=================+======+=============+##
@@ -2875,16 +2795,12 @@ Return ::Preview(	cPrinter,;	//01
 //#############################################################################
 Method CXLimpaTmp() Class CXMSPrinter
 
-	//Declaracao de variaveis----------------------------------------------------------------------
-	Local nTent		AS Integer
-	Local lApagou	AS Logical
-	Local lExiste	AS Logical
-	Local cFileTmp	AS Character
-	Local nX		AS Integer
-
-	//Inicializa Variaveis
-	nTent		:= 100
-	lApagou		:= .T.
+	//-- Declaração de Variáveis ----------------------------------------------
+	Local nTent		:= 100							AS Integer
+	Local lApagou	:= .T.							AS Logical
+	Local lExiste									AS Logical
+	Local cFileTmp									AS Character
+	Local nX										AS Integer
 
 	//Variaveis compartilhadas de mensagens de erro
 	cMsgErr		:= IIf(Type('cMsgErr')<>'C','',cMsgErr)
@@ -2982,24 +2898,19 @@ Return lApagou
 //##|          |           |                                                |##
 //##+==========+===========+================================================+##
 //#############################################################################
-Method CXApagaArq(	cArquivo	,;	// 01 cArquivo	
-					nTentativas	;	// 02 nTentativas
-						) Class CXMSPrinter
+Method CXApagaArq(	cArquivo	AS Character;	// 01 cArquivo	
+				,	nTentativas	AS Numeric	;	// 02 nTentativas
+				)		AS Logical Class CXMSPrinter
 
-	//Declaracao de variaveis----------------------------------------------------------------------
-	Local nX	AS Integer
-	Local lRet	AS Logical
+	//-- Declaração de Variáveis ----------------------------------------------
+	Local nX										AS Integer
+	Local lRet	:= .F.								AS Logical
 
-	//Parametros da rotina-------------------------------------------------------------------------
-	//Default nTentativas	:= 100
-	ParamType 0		VAR cArquivo  	  		AS Character
-	ParamType 1		VAR nTentativas  	  	AS Numeric			Optional Default 100
+	//-- Parâmetros da Rotina -------------------------------------------------
+	ParamObg 0		VAR cArquivo
+	Default nTentativas	:= 100
 
-	//Inicializa Variaveis-------------------------------------------------------------------------
-	lRet	:= .F.
-
-	//---------------------------------------------------------------------------------------------
-
+	//-------------------------------------------------------------------------
 	If File(cArquivo)
 		For nX := 1 to nTentativas
 			If fErase(cArquivo) == 0 //Apagou
@@ -3028,18 +2939,18 @@ Return lRet
 //##|          |           |                                                |##
 //##+==========+===========+================================================+##
 //#############################################################################
-Method CXAjustaLin(	nLin	,;	// 01 nLin
-					oFonte	;	// 02 oFonte
-						) Class CXMSPrinter
+Method CXAjustaLin(	nLin	AS Numeric	;	// 01 nLin
+				,	oFonte	AS Object	;	// 02 oFonte
+				)					AS Numeric Class CXMSPrinter
 
-	//Declaracao de variaveis----------------------------------------------------------------------
+	//-- Declaração de Variáveis ----------------------------------------------
 	Local nRet	AS Numeric
 
-	//Parametros da rotina-------------------------------------------------------------------------
-	ParamType 0		VAR nLin	  	AS Numeric
+	//-- Parâmetros da Rotina -------------------------------------------------
+	ParamObg 0		VAR nLin
 	ParamType 1		VAR oFonte	  	AS Object Class tFont,tFontEx
 
-	//---------------------------------------------------------------------------------------------
+	//-------------------------------------------------------------------------
 
 	nRet	:= nLin - ( ::CXTamLin(@oFonte,0.67)+2 )
 	nRet	:= Round(nRet,0) //Tentativa de melhorar a precisao padrao
@@ -3061,25 +2972,25 @@ Return nRet
 //##|          |           |                                                |##
 //##+==========+===========+================================================+##
 //#############################################################################
-Method CXAjPos2(nLin	,;	// 01 @nLin
-				nCol	;	// 02 @nCol
-					) Class CXMSPrinter
+Method CXAjPos2(nLin	AS Numeric ;	// 01 @nLin
+			,	nCol	AS Numeric ;	// 02 @nCol
+			)					Class CXMSPrinter
 
-	//Declaracao de variaveis----------------------------------------------------------------------
+	//-- Declaração de Variáveis ----------------------------------------------
 	Local nPos	AS Integer
 	
-	//Otimizacao
+	//-- Otimizacao
 	If 	Len(::_aPos2) == 0 .Or. ;
 		::_lAjPos
 		
 		Return
 	EndIf
 
-	//Parametros da rotina-------------------------------------------------------------------------
-	ParamType  0	VAR nLin	  	AS Numeric
-	ParamType  1	VAR nCol	  	AS Numeric
+	//-- Parâmetros da Rotina -------------------------------------------------
+	ParamObg  0	VAR nLin
+	ParamObg  1	VAR nCol
 
-	//---------------------------------------------------------------------------------------------
+	//-------------------------------------------------------------------------
 	::_lAjPos	:= .T.	//Controle de loop
 	nPos		:= aScan(::_aPos2,{|x| 	( x[1] == nLin .Or. x[1] < 0 ).And. ;
 										( x[2] == nCol .Or. x[2] < 0 )		})
@@ -3112,29 +3023,29 @@ Return
 //##|          |           |                                                |##
 //##+==========+===========+================================================+##
 //#############################################################################
-Method CXAjPos4(nLin1	,;	// 01 @nLin1
-				nCol1	,;	// 02 @nCol1
-				nLin2	,;	// 03 @nLin2
-				nCol2	;	// 04 @nCol2
-					) Class CXMSPrinter
+Method CXAjPos4(nLin1	AS Numeric	;	// 01 @nLin1
+			,	nCol1	AS Numeric	;	// 02 @nCol1
+			,	nLin2	AS Numeric	;	// 03 @nLin2
+			,	nCol2	AS Numeric	;	// 04 @nCol2
+			)							Class CXMSPrinter
 
-	//Declaracao de variaveis----------------------------------------------------------------------
+	//-- Declaração de Variáveis ----------------------------------------------
 	Local nPos			AS Integer
 	
-	//Otimizacao
+	//-- Otimizacao
 	If 	len(::_aPos4) == 0 .Or. ;
 		::_lAjPos
 		
 		Return
 	EndIf
 	
-	//Parametros da rotina-------------------------------------------------------------------------
-	ParamType  0	VAR nLin1	  	AS Numeric
-	ParamType  1	VAR nCol1	  	AS Numeric
-	ParamType  2	VAR nLin2	  	AS Numeric
-	ParamType  3	VAR nCol2	  	AS Numeric
+	//-- Parâmetros da Rotina -------------------------------------------------
+	ParamObg  0	VAR nLin1
+	ParamObg  1	VAR nCol1
+	ParamObg  2	VAR nLin2
+	ParamObg  3	VAR nCol2
 
-	//---------------------------------------------------------------------------------------------
+	//-------------------------------------------------------------------------
 	::_lAjPos	:= .T.	//Controle de loop
 	nPos		:= aScan(::_aPos4,{|x| 	( x[1] == nLin1 .Or. x[1] < 0 ) .And. ;
 										( x[2] == nCol1 .Or. x[2] < 0 ) .And. ;
@@ -3203,8 +3114,39 @@ Method Destroy() Class CXMSPrinter
 	FwFreeArray(::aImages)
 	FWFreeVar(::oFontSize)
 	FWFreeVar(::oPrint)
+	FWFreeVar(::_jCacheFont)
 
 Return
+//-------------------------------------------------------------------------------------------------
+/*/{Protheus.doc} FillRect
+@description	Sobreposição do método padrão para remapear as coordenadas de impressão.                               
+@autor			Cirilo Rocha
+@since			23/09/2025
+/*/
+//-------------------------------------------------------------------------------------------------
+Method FillRect(aCoord AS Array		;	//01
+			,	oBrush AS Object	;	//02
+			,	cPixel AS Character	;	//03
+			) Class CXMSPrinter
+
+	If ::_lErro ; Return NIL ; EndIf	//-- Pula quando existe erro
+
+	//-- Parâmetros da Rotina -------------------------------------------------
+	ParamObg  0 VAR aCoord
+	ParamType 1 VAR oBrush AS Object Class TBrush
+	Default cPixel := ::cEspLin
+
+	//-- Remapeia coordenadas -------------------------------------------------
+	::CXAjPos4(@aCoord[1], @aCoord[2], @aCoord[3], @aCoord[4], @Self)
+
+	uRet := _Super:FillRect(aCoord	;
+						,	oBrush	;
+						,	cPixel	;
+						)
+
+	::_lAjPos	:= .F.
+
+Return uRet
 
 //-------------------------------------------------------------------------------------------------
 //FEITO ASSIM PARA UTILIZAR TAMBEM NO TOTVS FIRST
@@ -3219,15 +3161,15 @@ Converte cor no padrao MSColor para Hexa-HTML Ex: FF0000
 @version 10.1.1.4
 /*/
 //-------------------------------------------------------------------------------------------------
-User Function MSColor2Hex(nMsColor)	//01
+User Function MSColor2Hex(nMsColor	AS Numeric)	AS Character
 
-	//Declaracao de variaveis----------------------------------------------------------------------
+	//-- Declaração de Variáveis ----------------------------------------------
 	Local cHex		AS Character
 
-	//Parametros da rotina-------------------------------------------------------------------------
-	ParamType  0	VAR nMsColor	  	AS Numeric
-
-	//Inicializa variaveis-------------------------------------------------------------------------
+	//-- Parâmetros da Rotina -------------------------------------------------
+	ParamObg  0	VAR nMsColor
+	
+	//-- Inicializa Variáveis -------------------------------------------------
 	cHex := NToC(nMsColor,16)
 
 	// Trata cor Preta = 0
